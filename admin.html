@@ -17,7 +17,7 @@
     <div id="logs"></div>
 
     <script>
-        // Updated to use WSS (Secure WebSocket) for your Vercel domain
+        // Use WSS to match your deployed domain
         const ws = new WebSocket(`wss://server-eight-pi-39.vercel.app`);
         let users = {};
 
@@ -29,9 +29,11 @@
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                
+
                 if (data.type === 'registered') {
                     ws.isAdmin = true;
+                } else if (data.type === 'alert') {
+                    addLog(data.message);
                 } else {
                     addLog(`[${data.targetId}] Received: ${data.type}`);
                     if (!users[data.targetId]) {
