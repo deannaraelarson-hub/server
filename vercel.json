@@ -16,10 +16,6 @@
       "use": "@vercel/static"
     },
     {
-      "src": "*.json",
-      "use": "@vercel/static"
-    },
-    {
       "src": "*.png",
       "use": "@vercel/static"
     },
@@ -54,10 +50,6 @@
   ],
   "routes": [
     {
-      "src": "/ws",
-      "dest": "/server.js"
-    },
-    {
       "src": "/admin.html",
       "dest": "/admin.html"
     },
@@ -67,7 +59,7 @@
     },
     {
       "src": "/",
-      "dest": "/index.html"
+      "dest": "/server.js"
     },
     {
       "src": "/(.*)",
