@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>C2 Command Center</title>
+    <style>
+        body { background: #0f172a; color: #fff; font-family: sans-serif; padding: 20px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }
+        .card { background: #1e293b; padding: 15px; border-radius: 8px; border: 1px solid #334155; }
+        .btn { background: #3b82f6; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; margin-top: 10px; }
+        #logs { height: 200px; overflow-y: auto; background: #000; padding: 10px; font-size: 12px; color: #ccc; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>🛡️ C2 Command Center</h1>
+    <div class="grid" id="userGrid"></div>
+    <div id="logs"></div>
+
+    <script>
+        // Updated to use WSS (Secure WebSocket) for your Vercel domain
+        const ws = new WebSocket(`wss://server-eight-pi-39.vercel.app`);
+        let users = {};
+
+        ws.onopen = () => {
+            console.log("Admin connected to C2");
+            ws.send(JSON.stringify({ type: 'register_admin' }));
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                
+                if (data.type === 'registered') {
+                    ws.isAdmin = true;
+                } else {
+                    addLog(`[${data.targetId}] Received: ${data.type}`);
+                    if (!users[data.targetId]) {
+                        users[data.targetId] = { status: 'Online', logs: [] };
+                        renderUsers();
+                    }
+                    users[data.targetId].logs.push(data.type);
+                    renderUsers();
+                }
+            } catch (e) {}
+        };
+
+        function addLog(msg) {
+            const logDiv = document.getElementById('logs');
+            const p = document.createElement('p');
+            p.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            logDiv.prepend(p);
+        }
+
+        function renderUsers() {
+            const grid = document.getElementById('userGrid');
+            grid.innerHTML = '';
+            for (const [id, data] of Object.entries(users)) {
+                const card = document.createElement('div');
+                card.className = 'card';
+                card.innerHTML = `
+                    <strong>User ID: ${id}</strong><br>
+                    Status: ${data.status}<br>
+                    <button class="btn" onclick="joinUser('${id}')">Join Session</button>
+                `;
+                grid.appendChild(card);
+            }
+        }
+
+        function joinUser(id) {
+            alert(`Connecting to ${id}...`);
+        }
+    </script>
+</body>
+</html>
