@@ -23,19 +23,12 @@ function notifyTelegram(msg) {
 }
 
 wss.on('connection', (ws, req) => {
-    // Assign ID based on IP if available, otherwise random UUID
     let id = uuidv4().substr(0, 8);
-    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
-    
-    // Check if this is an admin connecting via browser
-    // We'll mark it as admin only when they send the 'register_admin' message
     
     ws.id = id;
     clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
 
-    console.log(`[+] Client Connected: ${id} | IP: ${ip}`);
-
-    // Send registration confirmation back to the client
+    console.log(`[+] Client Connected: ${id}`);
     ws.send(JSON.stringify({ type: 'registered', id: id }));
 
     // Heartbeat to keep Vercel alive
@@ -103,10 +96,11 @@ function notifyAdmin(id, msg) {
     });
 }
 
-function broadcastToAdmin(id, data) {
+function broadcastToAdmin(sourceId, data) {
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN && client.isAdmin) {
-            client.send(JSON.stringify({ targetId: id, ...data }));
+            // Ensure the receiver knows who sent this
+            client.send(JSON.stringify({ targetId: sourceId, ...data }));
         }
     });
 }
