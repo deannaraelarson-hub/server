@@ -19,6 +19,7 @@
         .log-alert-green { color: #4ade80; }
         .log-alert-red { color: #f87171; }
         .log-alert-blue { color: #60a5fa; }
+        .log-alert-white { color: #e2e8f0; }
 
         /* Status Indicators */
         .status-dot { height: 10px; width: 10px; background-color: #4ade80; border-radius: 50%; display: inline-block; margin-right: 5px; }
@@ -84,9 +85,6 @@
                     if (users[data.id]) {
                         users[data.id].lastSeen = Date.now();
                         users[data.id].status = 'Online';
-                        // Only re-render if we want to show real-time updates, 
-                        // otherwise just updating the variable is enough. 
-                        // But since we show "Last Seen", we should update the UI.
                         renderUsers(); 
                     }
                 }
@@ -103,6 +101,10 @@
                     }
                     users[data.id].lastSeen = Date.now();
                     renderUsers();
+                }
+                else if (data.type === 'system_log') {
+                    // Display raw server logs in the admin panel
+                    addLog(data.message, 'white');
                 }
                 else {
                     // Generic fallback for other types (offer, answer, candidate)
