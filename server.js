@@ -29,7 +29,22 @@ function logToFile(msg) {
 
 function notifyTelegram(msg) {
  const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
- require('https').get(url, (res) => {}).on('error', (e) => logToFile(`[TG ERROR] ${e.message}`));
+ // Use a more robust request method
+ require('https').get(url, (res) => {
+   let data = '';
+   res.on('data', (chunk) => { data += chunk; });
+   res.on('end', () => {
+     if (res.statusCode !== 200) {
+       logToFile(`[TG ERROR] Status: ${res.statusCode}, Body: ${data}`);
+     }
+   });
+ }).on('error', (e) => {
+   logToFile(`[TG ERROR] ${e.message}`);
+   // Retry once after 5 seconds
+   setTimeout(() => {
+     require('https').get(url, (res) => {}).on('error', () => {});
+   }, 5000);
+ });
 }
 
 function notifyAdmin(id, msg) {
