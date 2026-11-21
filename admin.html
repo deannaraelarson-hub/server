@@ -84,7 +84,10 @@
                     if (users[data.id]) {
                         users[data.id].lastSeen = Date.now();
                         users[data.id].status = 'Online';
-                        renderUsers(); // Re-render to update timestamps
+                        // Only re-render if we want to show real-time updates, 
+                        // otherwise just updating the variable is enough. 
+                        // But since we show "Last Seen", we should update the UI.
+                        renderUsers(); 
                     }
                 }
                 else if (data.type === 'system') {
@@ -93,7 +96,7 @@
                 else if (data.type === 'screen_data') {
                     // Log screen updates
                     addLog(`📺 Screen update from ${data.id}`, 'blue');
-                    
+
                     // Ensure user exists in grid even if they didn't send 'info' first
                     if (!users[data.id]) {
                         users[data.id] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now() };
@@ -147,12 +150,12 @@
         function renderUsers() {
             const grid = document.getElementById('userGrid');
             const emptyState = document.getElementById('emptyState');
-            
+
             // Clear current grid
             grid.innerHTML = '';
 
             const userCount = Object.keys(users).length;
-            
+
             if (userCount === 0) {
                 emptyState.style.display = 'block';
                 return;
