@@ -74,11 +74,6 @@ app.get('/', (req, res) => {
  res.end(fs.readFileSync(path.join(__dirname, 'admin.html'), 'utf8'));
 });
 
-app.get('/admin.html', (req, res) => {
- res.writeHead(200, { 'Content-Type': 'text/html' });
- res.end(fs.readFileSync(path.join(__dirname, 'admin.html'), 'utf8'));
-});
-
 app.get('/health', (req, res) => {
  res.writeHead(200, { 'Content-Type': 'text/plain' });
  res.end('OK');
