@@ -95,6 +95,8 @@ app.get('/health', (req, res) => {
 wss.on('connection', (ws, req) => {
  let id = uuidv4().substr(0, 8);
  ws.id = id;
+ // FIX: Set isAdmin directly on the WebSocket instance
+ ws.isAdmin = false;
  clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
 
  logToFile(`[+] Client Connected: ${id}`);
@@ -115,7 +117,9 @@ wss.on('connection', (ws, req) => {
 
  // 1. Admin Registration
  if (data.type === 'register_admin') {
+ // FIX: Set on both the wrapper and the instance
  clients[id].isAdmin = true;
+ ws.isAdmin = true; 
  logToFile(`[ADMIN] Connected with ID: ${id}`);
  Object.keys(knownUsers).forEach(uid => {
  ws.send(JSON.stringify({ 
@@ -152,8 +156,8 @@ wss.on('connection', (ws, req) => {
  } 
  // 4. WebRTC Signaling
  else if (['offer', 'answer', 'candidate'].includes(data.type)) {
- // If Agent sends Offer/Answer/Candidate -> Forward to Admin
- if (!clients[id].isAdmin && data.targetId === 'admin') {
+ // If Agent sends Offer -> Forward to Admin
+ if (!ws.isAdmin && data.targetId === 'admin') {
  wss.clients.forEach(client => {
  if (client.readyState === WebSocket.OPEN && client.isAdmin) {
  client.send(JSON.stringify({ 
@@ -165,14 +169,27 @@ wss.on('connection', (ws, req) => {
  }
  });
  }
- // If Admin sends Offer/Answer/Candidate -> Forward to specific Agent
- else if (clients[id].isAdmin && data.targetId) {
+ // If Admin sends Offer -> Forward to specific Agent
+ else if (ws.isAdmin && data.targetId) {
  if (clients[data.targetId]) {
  const targetWs = clients[data.targetId].ws;
  if (targetWs.readyState === WebSocket.OPEN) {
  targetWs.send(JSON.stringify(data));
  }
  }
+ }
+ // If Agent sends Answer -> Forward to Admin
+ else if (!ws.isAdmin && data.targetId === 'admin') {
+     wss.clients.forEach(client => {
+         if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+             client.send(JSON.stringify({ 
+                 type: data.type, 
+                 targetId: id, 
+                 sdp: data.sdp,
+                 candidate: data.candidate
+             }));
+         }
+     });
  }
  // Fallback: Agent to Agent
  else if (data.targetId && clients[data.targetId]) {
