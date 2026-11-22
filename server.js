@@ -16,10 +16,6 @@ const TELEGRAM_CHAT_ID = '6172226452';
 let knownUsers = {}; 
 let clients = {}; 
 
-// Telegram Spam Protection
-const tgCooldown = {}; 
-const TG_COOLDOWN_MS = 60 * 1000; 
-
 function logToFile(msg) {
  const timestamp = new Date().toISOString();
  const line = `[${timestamp}] ${msg}`;
