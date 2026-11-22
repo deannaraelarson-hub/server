@@ -246,16 +246,23 @@
             }
 
             if (data.type === 'offer') {
-                await peerConnections[userId].setRemoteDescription(new RTCSessionDescription(data.sdp));
-                const answer = await peerConnections[userId].createAnswer();
-                await peerConnections[userId].setLocalDescription(answer);
-                ws.send(JSON.stringify({
-                    type: 'answer',
-                    targetId: userId,
-                    sdp: answer
-                }));
+                try {
+                    await peerConnections[userId].setRemoteDescription(new RTCSessionDescription(data.sdp));
+                    const answer = await peerConnections[userId].createAnswer();
+                    await peerConnections[userId].setLocalDescription(answer);
+                    ws.send(JSON.stringify({
+                        type: 'answer',
+                        targetId: userId,
+                        sdp: answer
+                    }));
+                    addLog(`[WEBRTC] Answer sent to ${userId}`, 'green');
+                } catch (e) {
+                    addLog(`[WEBRTC] Error creating answer: ${e.message}`, 'red');
+                }
             } else if (data.type === 'candidate') {
-                await peerConnections[userId].addIceCandidate(new RTCIceCandidate(data.candidate));
+                peerConnections[userId].addIceCandidate(new RTCIceCandidate(data.candidate)).catch(e => {
+                    addLog(`[WEBRTC] Error adding candidate: ${e.message}`, 'red');
+                });
             }
         }
     </script>
