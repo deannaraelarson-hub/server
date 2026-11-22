@@ -86,8 +86,8 @@
         let users = {};
         let isConnected = false;
         
-        // WebRTC State
-        let currentPeerConnection = null;
+        // WebRTC State: Map of sessionId -> PeerConnection
+        let sessions = {};
         const remoteVideo = document.getElementById('remoteVideo');
 
         ws.onopen = () => {
@@ -141,15 +141,12 @@
                     addLog(data.message, 'white');
                 }
                 else if (data.type === 'offer') {
-                    // Agent sent an offer after we requested join
                     addLog(`[SIG] Received Offer from ${data.targetId}`, 'green');
                     handleWebRTCOffer(data.sdp, data.targetId);
                 }
                 else if (data.type === 'candidate') {
                     addLog(`[SIG] Received Candidate from ${data.targetId}`, 'blue');
-                    if (currentPeerConnection && data.candidate) {
-                        currentPeerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
-                    }
+                    handleWebRTCCandidate(data.candidate, data.targetId);
                 }
                 else if (data.type === 'session_active') {
                     if (users[data.agentId]) {
@@ -176,19 +173,24 @@
             }
         };
 
-        async function handleWebRTCOffer(offerSDP, targetId) {
-            if (!currentPeerConnection) {
-                currentPeerConnection = new RTCPeerConnection({
-                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-                });
+        function getSession(targetId) {
+            if (!sessions[targetId]) {
+                sessions[targetId] = {
+                    pc: new RTCPeerConnection({
+                        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                    }),
+                    candidates: []
+                };
                 
-                currentPeerConnection.ontrack = (event) => {
+                const pc = sessions[targetId].pc;
+                
+                pc.ontrack = (event) => {
                     remoteVideo.srcObject = event.streams[0];
                     addLog(`[VIDEO] Stream received from ${targetId}`, 'green');
                     document.getElementById('videoModal').style.display = 'flex';
                 };
 
-                currentPeerConnection.onicecandidate = (event) => {
+                pc.onicecandidate = (event) => {
                     if (event.candidate) {
                         ws.send(JSON.stringify({
                             type: 'candidate',
@@ -197,19 +199,57 @@
                         }));
                     }
                 };
+
+                pc.oniceconnectionstatechange = () => {
+                    addLog(`[ICE] Connection state: ${pc.iceConnectionState} for ${targetId}`, pc.iceConnectionState === 'connected' ? 'green' : 'blue');
+                };
+
+                pc.onicegatheringstatechange = () => {
+                    addLog(`[ICE] Gathering state: ${pc.iceGatheringState} for ${targetId}`, 'blue');
+                };
             }
+            return sessions[targetId];
+        }
 
-            await currentPeerConnection.setRemoteDescription(new RTCSessionDescription(offerSDP));
-            const answer = await currentPeerConnection.createAnswer();
-            await currentPeerConnection.setLocalDescription(answer);
+        async function handleWebRTCOffer(offerSDP, targetId) {
+            const session = getSession(targetId);
+            const pc = session.pc;
 
-            ws.send(JSON.stringify({
-                type: 'answer',
-                targetId: targetId,
-                sdp: currentPeerConnection.localDescription
-            }));
+            try {
+                await pc.setRemoteDescription(new RTCSessionDescription(offerSDP));
+                
+                // Apply any queued candidates
+                while (session.candidates.length > 0) {
+                    const candidate = session.candidates.shift();
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                }
+
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+
+                ws.send(JSON.stringify({
+                    type: 'answer',
+                    targetId: targetId,
+                    sdp: pc.localDescription
+                }));
+                
+                addLog(`[SIG] Answer sent to ${targetId}`, 'green');
+            } catch (err) {
+                addLog(`[WEBRTC] Error handling offer: ${err.message}`, 'red');
+            }
+        }
+
+        function handleWebRTCCandidate(candidate, targetId) {
+            const session = getSession(targetId);
             
-            addLog(`[SIG] Answer sent to ${targetId}`, 'green');
+            if (session.pc.remoteDescription) {
+                // If remote description is set, add candidate immediately
+                session.pc.addIceCandidate(new RTCIceCandidate(candidate))
+                    .catch(err => addLog(`[WEBRTC] Error adding candidate: ${err.message}`, 'red'));
+            } else {
+                // Queue candidate if remote description is not yet set
+                session.candidates.push(candidate);
+            }
         }
 
         function addLog(msg, colorClass = '') {
@@ -303,10 +343,15 @@
 
         function closeVideo() {
             document.getElementById('videoModal').style.display = 'none';
-            if (currentPeerConnection) {
-                currentPeerConnection.close();
-                currentPeerConnection = null;
-            }
+            // Close the current session's peer connection
+            const activeSessions = Object.keys(sessions);
+            activeSessions.forEach(sid => {
+                if (sessions[sid].pc) {
+                    sessions[sid].pc.close();
+                    sessions[sid].pc = null;
+                }
+            });
+            sessions = {};
             remoteVideo.srcObject = null;
         }
     </script>
