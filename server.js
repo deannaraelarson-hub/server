@@ -157,7 +157,11 @@ wss.on('connection', (ws, req) => {
      }
     }
    }
+   // --- WEBRTC SIGNALING FORWARDER ---
    else if (['offer', 'answer', 'candidate'].includes(data.type)) {
+    logToFile(`[SIG] Forwarding ${data.type} from ${id} to ${data.targetId || 'all_admins'}`);
+    
+    // If Admin sends Offer -> Send to specific Agent
     if (clients[id].isAdmin && data.targetId) {
      if (clients[data.targetId]) {
       const targetWs = clients[data.targetId].ws;
@@ -166,6 +170,7 @@ wss.on('connection', (ws, req) => {
       }
      }
     } 
+    // If Agent sends Answer -> Send to all Admins
     else if (!clients[id].isAdmin) {
      wss.clients.forEach(client => {
       if (client.readyState === WebSocket.OPEN && client.isAdmin) {
@@ -179,7 +184,9 @@ wss.on('connection', (ws, req) => {
      });
     }
    }
+   // --- SESSION STARTED ---
    else if (data.type === 'join_accepted') {
+    logToFile(`[SESSION] Session established with ${data.agentId}`);
     if (clients[id].isAdmin) {
      clients[id].send(JSON.stringify({
       type: 'session_active',
