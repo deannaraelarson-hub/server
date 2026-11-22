@@ -25,8 +25,6 @@
         /* Status Indicators */
         .status-dot { height: 10px; width: 10px; background-color: #4ade80; border-radius: 50%; display: inline-block; margin-right: 5px; }
         .empty-state { text-align: center; color: #64748b; margin-top: 50px; font-style: italic; }
-        .badge { position: absolute; top: 10px; right: 10px; background: #ef4444; color: white; padding: 2px 6px; border-radius: 4px; font-size: 10px; display: none; }
-        .badge.active { display: block; }
     </style>
 </head>
 <body>
@@ -68,6 +66,8 @@
                 }
                 else if (data.type === 'info') {
                     addLog(`🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`, 'green');
+                    
+                    // CRITICAL: Ensure the user object exists in our local state
                     if (!users[data.id]) {
                         users[data.id] = { status: 'Online', logs: [], info: data, lastSeen: Date.now() };
                     } else {
@@ -160,8 +160,11 @@
         function renderUsers() {
             const grid = document.getElementById('userGrid');
             const emptyState = document.getElementById('emptyState');
+            
+            // Clear and rebuild
             grid.innerHTML = '';
             const userCount = Object.keys(users).length;
+            
             if (userCount === 0) {
                 emptyState.style.display = 'block';
                 return;
@@ -172,6 +175,7 @@
             for (const [id, data] of Object.entries(users)) {
                 const card = document.createElement('div');
                 card.className = 'card';
+                
                 const osInfo = data.info ? `${data.info.os} / ${data.info.user}` : 'Unknown OS';
                 const lastSeen = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'N/A';
                 const statusColor = data.status === 'Connected' ? '#4ade80' : (data.status === 'Connecting...' ? '#fbbf24' : '#4ade80');
