@@ -16,6 +16,9 @@ const TELEGRAM_CHAT_ID = '6172226452';
 let knownUsers = {}; 
 let clients = {}; 
 
+const tgCooldown = {}; 
+const TG_COOLDOWN_MS = 60 * 1000; 
+
 function logToFile(msg) {
  const timestamp = new Date().toISOString();
  const line = `[${timestamp}] ${msg}`;
@@ -76,7 +79,7 @@ app.get('/health', (req, res) => {
 wss.on('connection', (ws, req) => {
  let id = uuidv4().substr(0, 8);
  ws.id = id;
- clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
+ clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false, currentSession: null };
 
  logToFile(`[+] Client Connected: ${id}`);
  ws.send(JSON.stringify({ type: 'registered', id: id }));
@@ -147,14 +150,13 @@ wss.on('connection', (ws, req) => {
      if (targetWs.readyState === WebSocket.OPEN) {
       targetWs.send(JSON.stringify({
        type: 'join_request',
-       from: id, 
+       from: id,
        timestamp: Date.now()
       }));
       logToFile(`[ADMIN] Requested join to ${targetId}`);
      }
     }
    }
-   // Signaling Forwarding
    else if (['offer', 'answer', 'candidate'].includes(data.type)) {
     if (clients[id].isAdmin && data.targetId) {
      if (clients[data.targetId]) {
@@ -177,7 +179,7 @@ wss.on('connection', (ws, req) => {
      });
     }
    }
-   else if (data.type === 'session_active') {
+   else if (data.type === 'join_accepted') {
     if (clients[id].isAdmin) {
      clients[id].send(JSON.stringify({
       type: 'session_active',
