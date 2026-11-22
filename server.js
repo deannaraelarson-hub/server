@@ -107,18 +107,15 @@ wss.on('connection', (ws, req) => {
  return;
  }
 
- // If payload sends its own ID in 'info', we use that to update existing or create new
+ // CRITICAL FIX: Handle Info packets to ensure the UI has an ID to render
  if (data.type === 'info') {
- if (data.id && data.id !== id) {
- // It's a reconnect or re-registration with a known ID
- if (clients[data.id]) {
+ // If the payload sends its own ID, update that specific client entry
+ if (data.id && clients[data.id]) {
  clients[data.id].ws = ws;
  clients[data.id].lastSeen = Date.now();
  clients[data.id].info = data;
  } else {
- clients[data.id] = { ws, info: data, lastSeen: Date.now(), isAdmin: false };
- }
- } else {
+ // Otherwise, assume the current WS connection IS this user
  clients[id].info = data;
  clients[id].lastSeen = Date.now();
  }
@@ -140,7 +137,6 @@ wss.on('connection', (ws, req) => {
  }
  } 
  else if (data.type === 'join_all') {
- // Broadcast join request to all other agents
  Object.keys(clients).forEach(cid => {
  if (cid !== id && clients[cid].ws.readyState === WebSocket.OPEN) {
  clients[cid].ws.send(JSON.stringify({
@@ -152,7 +148,6 @@ wss.on('connection', (ws, req) => {
  });
  } 
  else if (data.type === 'request_join') {
- // Admin requests to join a specific payload
  const targetId = data.targetId;
  if (clients[targetId]) {
  clients[targetId].ws.send(JSON.stringify({
