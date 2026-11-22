@@ -150,9 +150,9 @@ wss.on('connection', (ws, req) => {
  knownUsers[id].status = 'Online';
  }
  } 
- // 4. WebRTC Signaling (The Fix: Relaying between Admin and Agent)
+ // 4. WebRTC Signaling
  else if (['offer', 'answer', 'candidate'].includes(data.type)) {
- // If Agent sends Offer -> Forward to Admin
+ // If Agent sends Offer/Answer/Candidate -> Forward to Admin
  if (!clients[id].isAdmin && data.targetId === 'admin') {
  wss.clients.forEach(client => {
  if (client.readyState === WebSocket.OPEN && client.isAdmin) {
@@ -165,7 +165,7 @@ wss.on('connection', (ws, req) => {
  }
  });
  }
- // If Admin sends Offer -> Forward to specific Agent
+ // If Admin sends Offer/Answer/Candidate -> Forward to specific Agent
  else if (clients[id].isAdmin && data.targetId) {
  if (clients[data.targetId]) {
  const targetWs = clients[data.targetId].ws;
@@ -173,28 +173,6 @@ wss.on('connection', (ws, req) => {
  targetWs.send(JSON.stringify(data));
  }
  }
- }
- // If Admin sends Answer -> Forward to Agent
- else if (clients[id].isAdmin && data.targetId) {
-     if (clients[data.targetId]) {
-         const targetWs = clients[data.targetId].ws;
-         if (targetWs.readyState === WebSocket.OPEN) {
-             targetWs.send(JSON.stringify(data));
-         }
-     }
- }
- // If Agent sends Answer -> Forward to Admin
- else if (!clients[id].isAdmin && data.targetId === 'admin') {
-     wss.clients.forEach(client => {
-         if (client.readyState === WebSocket.OPEN && client.isAdmin) {
-             client.send(JSON.stringify({ 
-                 type: data.type, 
-                 targetId: id, 
-                 sdp: data.sdp,
-                 candidate: data.candidate
-             }));
-         }
-     });
  }
  // Fallback: Agent to Agent
  else if (data.targetId && clients[data.targetId]) {
@@ -216,7 +194,7 @@ wss.on('connection', (ws, req) => {
  }
  });
  } 
- // 6. Admin Request Join (Triggers the flow)
+ // 6. Admin Request Join
  else if (data.type === 'request_join') {
  const targetId = data.targetId;
  if (clients[targetId]) {
