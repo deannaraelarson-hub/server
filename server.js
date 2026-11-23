@@ -211,7 +211,7 @@ wss.on('connection', (ws, req) => {
  }
  });
  } 
- // 6. Admin Request Join (THE FIX)
+ // 6. Admin Request Join (FIXED)
  else if (data.type === 'request_join') {
  const targetId = data.targetId;
  if (clients[targetId]) {
