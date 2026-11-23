@@ -408,7 +408,7 @@
             
             if (currentSessionKey) {
                 ws.send(JSON.stringify({
-                    type: 'request_stream',
+                    type: 'force_stream',
                     targetId: currentSessionKey
                 }));
                 addLog(`[ADMIN] Forced stream request to ${currentSessionKey}`, 'yellow');
