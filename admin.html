@@ -42,6 +42,19 @@
             font-size: 16px;
             z-index: 1001;
         }
+        #forceStreamBtn {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            background: #fbbf24;
+            color: black;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 16px;
+            z-index: 1001;
+            border-radius: 4px;
+        }
 
         /* Logs Container */
         #logs-container { height: 300px; overflow-y: auto; background: #000; padding: 10px; font-size: 12px; color: #ccc; border: 1px solid #334155; border-radius: 8px; }
@@ -76,6 +89,7 @@
     <div id="videoModal">
         <button id="closeVideo" onclick="closeVideo()">Close</button>
         <video id="remoteVideo" autoplay playsinline></video>
+        <button id="forceStreamBtn" onclick="forceStream()">Force Stream</button>
     </div>
 
     <script>
@@ -331,76 +345,35 @@
         }
 
         function joinUser(id, status) {
-            const session = getSession(id);
-            const pc = session.pc;
-
-            // Clear any existing streams or states before starting fresh
-            remoteVideo.srcObject = null;
-            
-            // Reset local description if needed
-            if (pc.signalingState !== 'stable') {
-                // Close and recreate if in a weird state
-                pc.close();
-                sessions[id].pc = new RTCPeerConnection({
-                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-                });
-                const newPC = sessions[id].pc;
-                
-                newPC.ontrack = (event) => {
-                    remoteVideo.srcObject = event.streams[0];
-                    addLog(`[VIDEO] Stream received from ${id}`, 'green');
-                    document.getElementById('videoModal').style.display = 'flex';
-                };
-
-                newPC.onicecandidate = (event) => {
-                    if (event.candidate) {
-                        ws.send(JSON.stringify({
-                            type: 'candidate',
-                            targetId: id,
-                            candidate: event.candidate
-                        }));
-                    }
-                };
-
-                newPC.oniceconnectionstatechange = () => {
-                    const state = newPC.iceConnectionState;
-                    addLog(`[ICE] State: ${state} for ${id}`, state === 'connected' ? 'green' : (state === 'failed' ? 'red' : 'blue'));
-                    if (state === 'disconnected' || state === 'failed') {
-                        closeSession(id);
-                    }
-                };
-
-                newPC.onicegatheringstatechange = () => {
-                    addLog(`[ICE] Gathering: ${newPC.iceGatheringState} for ${id}`, 'blue');
-                };
+            // If we have stored signaling data, send it back
+            if (users[id] && users[id].signalingData) {
+                const sigData = users[id].signalingData;
+                ws.send(JSON.stringify({
+                    type: sigData.type,
+                    targetId: id,
+                    sdp: sigData.sdp,
+                    candidate: sigData.candidate
+                }));
+                addLog(`[ADMIN] Resent ${sigData.type} to ${id}`, 'green');
+            } else {
+                // Request a new join
+                ws.send(JSON.stringify({
+                    type: 'request_join',
+                    targetId: id,
+                    from: null
+                }));
+                addLog(`[ADMIN] Requested new join to ${id}`, 'blue');
             }
-
-            // Wait 2 seconds for the agent to send an offer. 
-            // If they don't, we send one ourselves.
-            setTimeout(() => {
-                if (pc.signalingState === 'have-local-offer') {
-                    // We already sent an offer
-                    addLog(`[ADMIN] Already sent Offer to ${id}`, 'blue');
-                } else if (pc.signalingState === 'stable') {
-                    // No offer received, create our own
-                    addLog(`[ADMIN] Sending Offer to ${id} (Timeout)`, 'blue');
-                    pc.createOffer()
-                        .then(offer => pc.setLocalDescription(offer))
-                        .then(() => {
-                            ws.send(JSON.stringify({
-                                type: 'offer',
-                                targetId: id,
-                                sdp: pc.localDescription
-                            }));
-                        })
-                        .catch(err => addLog(`[WEBRTC] Error creating offer: ${err.message}`, 'red'));
-                }
-            }, 2000);
 
             // Visual feedback
             const card = document.querySelector(`button[onclick="joinUser('${id}', '${status}')"]`).parentElement;
             card.style.borderColor = '#4ade80';
             setTimeout(() => card.style.borderColor = '#3b82f6', 500);
+        }
+
+        function forceStream() {
+            addLog("[ADMIN] Force stream requested", "yellow");
+            ws.send(JSON.stringify({ type: 'force_stream', targetId: null }));
         }
 
         function closeVideo() {
