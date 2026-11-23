@@ -215,6 +215,7 @@ wss.on('connection', (ws, req) => {
  else if (data.type === 'request_join') {
  const targetId = data.targetId;
  if (clients[targetId]) {
+ // FIX: Include the sender's ID so the agent knows who to reply to
  clients[targetId].ws.send(JSON.stringify({
  type: 'join_request',
  from: id, 
