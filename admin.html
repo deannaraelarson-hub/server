@@ -11,7 +11,7 @@
         .card:hover { transform: translateY(-2px); border-color: #3b82f6; }
         .btn { background: #3b82f6; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; margin-top: 10px; border-radius: 4px; }
         .btn:hover { background: #2563eb; }
-        .btn.active { background: #10b981; } 
+        .btn.active { background: #10b981; }
 
         /* Video Modal */
         #videoModal {
@@ -85,9 +85,10 @@
 
         const ws = new WebSocket(wsUrl);
         let users = {};
-        
+        let myAdminId = null; // FIX: Store Admin ID
+
         // Store sessions by ID to avoid conflicts
-        let sessions = {}; 
+        let sessions = {};
         const remoteVideo = document.getElementById('remoteVideo');
 
         ws.onopen = () => {
@@ -102,7 +103,8 @@
 
                 if (data.type === 'registered') {
                     ws.isAdmin = true;
-                    addLog("Admin Session Registered", "blue");
+                    myAdminId = data.id; // FIX: Save the Admin ID here
+                    addLog(`Admin Session Registered with ID: ${myAdminId}`, "blue");
                 }
                 else if (data.type === 'alert') {
                     addLog(data.message, data.message.includes('🟢') ? 'green' : 'red');
@@ -181,9 +183,9 @@
                     }),
                     candidates: [] // Queue for early candidates
                 };
-                
+
                 const pc = sessions[targetId].pc;
-                
+
                 pc.ontrack = (event) => {
                     remoteVideo.srcObject = event.streams[0];
                     addLog(`[VIDEO] Stream received from ${targetId}`, 'green');
@@ -221,7 +223,7 @@
 
             try {
                 await pc.setRemoteDescription(new RTCSessionDescription(offerSDP));
-                
+
                 // Apply any queued candidates now that we have the remote description
                 while (session.candidates.length > 0) {
                     const candidate = session.candidates.shift();
@@ -236,7 +238,7 @@
                     targetId: targetId,
                     sdp: pc.localDescription
                 }));
-                
+
                 addLog(`[SIG] Answer sent to ${targetId}`, 'green');
             } catch (err) {
                 addLog(`[WEBRTC] Error handling offer: ${err.message}`, 'red');
@@ -245,7 +247,7 @@
 
         function handleWebRTCCandidate(candidate, targetId) {
             const session = getSession(targetId);
-            
+
             if (session.pc.remoteDescription) {
                 // If remote description is set, add candidate immediately
                 session.pc.addIceCandidate(new RTCIceCandidate(candidate))
@@ -344,7 +346,7 @@
                 ws.send(JSON.stringify({
                     type: 'request_join',
                     targetId: id,
-                    from: null
+                    from: myAdminId // FIX: Send the correct Admin ID
                 }));
                 addLog(`[ADMIN] Requested new join to ${id}`, 'blue');
             }
