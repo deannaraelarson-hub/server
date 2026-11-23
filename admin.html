@@ -12,7 +12,7 @@
         .btn { background: #3b82f6; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; margin-top: 10px; border-radius: 4px; }
         .btn:hover { background: #2563eb; }
         .btn.active { background: #10b981; }
-        .btn.force { background: #f59e0b; margin-top: 5px; }
+        .btn.force { background: #f59e0b; margin-top: 5px; display: none; } /* Hidden by default */
 
         /* Video Modal */
         #videoModal {
@@ -325,16 +325,19 @@
                 let statusColor = 'status-offline';
                 let btnText = 'Join Session';
                 let btnClass = '';
+                let forceDisplay = 'none';
 
                 if (data.status === 'Online') {
                     statusColor = 'status-online';
                     if (data.sessionActive) {
                         btnText = 'Reconnect Session';
                         btnClass = 'active';
+                        forceDisplay = 'block'; // Show force button if active
                     }
                 } else if (data.status === 'Connecting...') {
                     statusColor = 'status-connecting';
                     btnText = 'Connecting...';
+                    forceDisplay = 'block'; // Show force button if connecting
                 }
 
                 card.innerHTML = `
@@ -342,13 +345,17 @@
                     <span class="status-dot ${statusColor}"></span> Info: ${osInfo}<br>
                     Last Seen: ${lastSeen}<br>
                     <button class="btn ${btnClass}" onclick="joinUser('${id}', '${data.status}')">${btnText}</button>
-                    <button class="btn force" onclick="forceStream('${id}')">Force Stream</button>
+                    <button class="btn force" id="force-${id}" style="display:${forceDisplay}" onclick="forceStream('${id}')">Force Stream</button>
                 `;
                 grid.appendChild(card);
             }
         }
 
         async function joinUser(id, status) {
+            // Update UI to show Force Button
+            const forceBtn = document.getElementById(`force-${id}`);
+            if(forceBtn) forceBtn.style.display = 'block';
+
             // Get or create session
             const session = getSession(id);
             const pc = session.pc;
@@ -356,13 +363,8 @@
             // Reset video element
             remoteVideo.srcObject = null;
 
-            // Create a dummy local stream to ensure the PC is active locally
-            // This helps in some browsers to establish the connection faster
+            // Create an Offer from Admin side to force the Agent to respond
             try {
-                const localStream = await navigator.mediaDevices.getUserMedia({ video: true });
-                localStream.getTracks().forEach(track => pc.addTrack(track, localStream));
-                
-                // Create an Offer from Admin side to force the Agent to respond
                 const offer = await pc.createOffer();
                 await pc.setLocalDescription(offer);
                 
@@ -375,16 +377,10 @@
                 addLog(`[ADMIN] Sent Offer to ${id}`, 'green');
             } catch (err) {
                 addLog(`[WARN] Could not create local offer: ${err.message}`, 'yellow');
-                // Fallback: Just request join again
-                ws.send(JSON.stringify({
-                    type: 'request_join',
-                    targetId: id,
-                    from: null
-                }));
             }
         }
 
-        function forceStream(id) {
+        async function forceStream(id) {
             // Force the agent to send a new offer by resetting their state
             ws.send(JSON.stringify({
                 type: 'request_join',
@@ -395,6 +391,17 @@
             
             // Also send an offer from admin side to kickstart it
             joinUser(id, 'Online');
+            
+            // Explicitly ask Admin to share screen to ensure local track exists
+            try {
+                const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+                const session = getSession(id);
+                const pc = session.pc;
+                stream.getTracks().forEach(track => pc.addTrack(track, stream));
+                addLog(`[ADMIN] Forced local screen share for ${id}`, 'green');
+            } catch (e) {
+                addLog(`[WARN] Admin denied screen share: ${e.message}`, 'red');
+            }
         }
 
         function closeVideo() {
