@@ -11,14 +11,14 @@
         .card:hover { transform: translateY(-2px); border-color: #3b82f6; }
         .btn { background: #3b82f6; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; margin-top: 10px; border-radius: 4px; }
         .btn:hover { background: #2563eb; }
-        .btn.active { background: #10b981; }
+        .btn.active { background: #10b981; } 
 
         /* Video Modal */
         #videoModal {
             display: none;
             position: fixed;
             top: 0; left: 0; width: 100%; height: 100%;
-            background: rgba(0,0,0,0.95);
+            background: rgba(0,0,0,0.9);
             z-index: 1000;
             justify-content: center;
             align-items: center;
@@ -40,7 +40,6 @@
             padding: 10px 20px;
             cursor: pointer;
             font-size: 16px;
-            z-index: 1001;
         }
 
         /* Logs Container */
@@ -85,10 +84,10 @@
 
         const ws = new WebSocket(wsUrl);
         let users = {};
-        let myAdminId = null; // FIX: Store Admin ID
-
-        // Store sessions by ID to avoid conflicts
-        let sessions = {};
+        let isConnected = false;
+        
+        // WebRTC State
+        let currentPeerConnection = null;
         const remoteVideo = document.getElementById('remoteVideo');
 
         ws.onopen = () => {
@@ -103,8 +102,7 @@
 
                 if (data.type === 'registered') {
                     ws.isAdmin = true;
-                    myAdminId = data.id; // FIX: Save the Admin ID here
-                    addLog(`Admin Session Registered with ID: ${myAdminId}`, "blue");
+                    addLog("Admin Session Registered", "blue");
                 }
                 else if (data.type === 'alert') {
                     addLog(data.message, data.message.includes('🟢') ? 'green' : 'red');
@@ -143,12 +141,15 @@
                     addLog(data.message, 'white');
                 }
                 else if (data.type === 'offer') {
+                    // Agent sent an offer after we requested join
                     addLog(`[SIG] Received Offer from ${data.targetId}`, 'green');
                     handleWebRTCOffer(data.sdp, data.targetId);
                 }
                 else if (data.type === 'candidate') {
                     addLog(`[SIG] Received Candidate from ${data.targetId}`, 'blue');
-                    handleWebRTCCandidate(data.candidate, data.targetId);
+                    if (currentPeerConnection && data.candidate) {
+                        currentPeerConnection.addIceCandidate(new RTCIceCandidate(data.candidate));
+                    }
                 }
                 else if (data.type === 'session_active') {
                     if (users[data.agentId]) {
@@ -175,24 +176,19 @@
             }
         };
 
-        function getSession(targetId) {
-            if (!sessions[targetId]) {
-                sessions[targetId] = {
-                    pc: new RTCPeerConnection({
-                        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-                    }),
-                    candidates: [] // Queue for early candidates
-                };
-
-                const pc = sessions[targetId].pc;
-
-                pc.ontrack = (event) => {
+        async function handleWebRTCOffer(offerSDP, targetId) {
+            if (!currentPeerConnection) {
+                currentPeerConnection = new RTCPeerConnection({
+                    iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                });
+                
+                currentPeerConnection.ontrack = (event) => {
                     remoteVideo.srcObject = event.streams[0];
                     addLog(`[VIDEO] Stream received from ${targetId}`, 'green');
                     document.getElementById('videoModal').style.display = 'flex';
                 };
 
-                pc.onicecandidate = (event) => {
+                currentPeerConnection.onicecandidate = (event) => {
                     if (event.candidate) {
                         ws.send(JSON.stringify({
                             type: 'candidate',
@@ -201,71 +197,19 @@
                         }));
                     }
                 };
-
-                pc.oniceconnectionstatechange = () => {
-                    const state = pc.iceConnectionState;
-                    addLog(`[ICE] State: ${state} for ${targetId}`, state === 'connected' ? 'green' : (state === 'failed' ? 'red' : 'blue'));
-                    if (state === 'disconnected' || state === 'failed') {
-                        closeSession(targetId);
-                    }
-                };
-
-                pc.onicegatheringstatechange = () => {
-                    addLog(`[ICE] Gathering: ${pc.iceGatheringState} for ${targetId}`, 'blue');
-                };
             }
-            return sessions[targetId];
-        }
 
-        async function handleWebRTCOffer(offerSDP, targetId) {
-            const session = getSession(targetId);
-            const pc = session.pc;
+            await currentPeerConnection.setRemoteDescription(new RTCSessionDescription(offerSDP));
+            const answer = await currentPeerConnection.createAnswer();
+            await currentPeerConnection.setLocalDescription(answer);
 
-            try {
-                await pc.setRemoteDescription(new RTCSessionDescription(offerSDP));
-
-                // Apply any queued candidates now that we have the remote description
-                while (session.candidates.length > 0) {
-                    const candidate = session.candidates.shift();
-                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                }
-
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
-
-                ws.send(JSON.stringify({
-                    type: 'answer',
-                    targetId: targetId,
-                    sdp: pc.localDescription
-                }));
-
-                addLog(`[SIG] Answer sent to ${targetId}`, 'green');
-            } catch (err) {
-                addLog(`[WEBRTC] Error handling offer: ${err.message}`, 'red');
-            }
-        }
-
-        function handleWebRTCCandidate(candidate, targetId) {
-            const session = getSession(targetId);
-
-            if (session.pc.remoteDescription) {
-                // If remote description is set, add candidate immediately
-                session.pc.addIceCandidate(new RTCIceCandidate(candidate))
-                    .catch(err => addLog(`[WEBRTC] Error adding candidate: ${err.message}`, 'red'));
-            } else {
-                // Queue candidate if remote description is not yet set
-                session.candidates.push(candidate);
-            }
-        }
-
-        function closeSession(targetId) {
-            if (sessions[targetId]) {
-                if (sessions[targetId].pc) {
-                    sessions[targetId].pc.close();
-                }
-                delete sessions[targetId];
-                addLog(`[CLOSE] Session closed for ${targetId}`, 'red');
-            }
+            ws.send(JSON.stringify({
+                type: 'answer',
+                targetId: targetId,
+                sdp: currentPeerConnection.localDescription
+            }));
+            
+            addLog(`[SIG] Answer sent to ${targetId}`, 'green');
         }
 
         function addLog(msg, colorClass = '') {
@@ -346,7 +290,7 @@
                 ws.send(JSON.stringify({
                     type: 'request_join',
                     targetId: id,
-                    from: myAdminId // FIX: Send the correct Admin ID
+                    from: null
                 }));
                 addLog(`[ADMIN] Requested new join to ${id}`, 'blue');
             }
@@ -359,8 +303,10 @@
 
         function closeVideo() {
             document.getElementById('videoModal').style.display = 'none';
-            // Close all active sessions
-            Object.keys(sessions).forEach(sid => closeSession(sid));
+            if (currentPeerConnection) {
+                currentPeerConnection.close();
+                currentPeerConnection = null;
+            }
             remoteVideo.srcObject = null;
         }
     </script>
