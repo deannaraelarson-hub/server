@@ -211,13 +211,13 @@ wss.on('connection', (ws, req) => {
  }
  });
  } 
- // 6. Admin Request Join
+ // 6. Admin Request Join (THE FIX)
  else if (data.type === 'request_join') {
  const targetId = data.targetId;
  if (clients[targetId]) {
- // FIX: Include the sender's ID so the agent knows who to reply to
+ // Send a specific 'start_join' signal to force the agent to initiate the offer
  clients[targetId].ws.send(JSON.stringify({
- type: 'join_request',
+ type: 'start_join',
  from: id, 
  timestamp: Date.now()
  }));
