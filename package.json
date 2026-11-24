@@ -1,14 +1,22 @@
+
 {
   "name": "screen-connect",
   "version": "1.0.0",
+  "private": true,
+  "description": "Screen Connect WebSocket and Express server",
   "main": "server.js",
+  "engines": {
+    "node": "22.x",
+    "npm": ">=10.0.0"
+  },
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "uuid": "^9.0.0",
-    "ws": "^8.13.0",
-    "better-sqlite3": "^11.7.0"
+    "express": "^4.21.2",
+    "uuid": "^11.0.5",
+    "ws": "^8.18.0",
+    "better-sqlite3": "11.7.0"
   }
 }
