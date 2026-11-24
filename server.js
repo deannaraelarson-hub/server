@@ -5,7 +5,7 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
 const sqlite3 = require('better-sqlite3');
-
+ 
 // --- DATABASE SETUP ---
 const DB_PATH = path.join(__dirname, 'c2.db');
 const db = sqlite3(DB_PATH);
