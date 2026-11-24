@@ -33,7 +33,7 @@ try {
  if (IS_RENDER) {
  // This directory must be the mount path of your Render
  // Persistent Disk. Without that disk, /var/data is ephemeral.
- fs.mkdirSync(path.dirname(RENDER_PERSISTED_DB_PATH), {
+ fs.mkdirSync(path.dirname(RENDER_PERSISTENT_DB_PATH), {
  recursive: true
  });
 
