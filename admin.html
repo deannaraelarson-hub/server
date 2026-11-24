@@ -14,6 +14,8 @@
         .btn.active { background: #10b981; }
         .btn-force { background: #f59e0b; margin-top: 5px; }
         .btn-force:hover { background: #d97706; }
+        .btn-danger { background: #ef4444; margin-top: 5px; }
+        .btn-danger:hover { background: #dc2626; }
 
         /* Video Modal */
         #videoModal {
@@ -135,7 +137,7 @@
                         users[data.id].status = 'Online';
                         renderUsers();
                     }
-                } 
+                }
                 else if (data.type === 'system') {
                     addLog(data.message, "blue");
                 }
@@ -335,6 +337,7 @@
                     Last Seen: ${lastSeen}<br>
                     <button class="btn ${btnClass}" onclick="joinUser('${id}', '${data.status}')">${btnText}</button>
                     <button class="btn btn-force" onclick="forceLiveView('${id}')">📺 Force Live View</button>
+                    <button class="btn btn-danger" onclick="deleteUser('${id}')">❌ Delete User</button>
                 `;
                 grid.appendChild(card);
             }
@@ -393,6 +396,14 @@
                     targetId: lastId,
                     from: null
                 }));
+            }
+        }
+
+        function deleteUser(id) {
+            if (confirm(`Are you sure you want to delete ${id}?`)) {
+                delete users[id];
+                renderUsers();
+                addLog(`[DELETE] User ${id} removed from dashboard`, 'red');
             }
         }
 
