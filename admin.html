@@ -188,6 +188,7 @@
 
                 const pc = sessions[targetId].pc;
 
+                // FIX: This ensures the video player actually gets the stream
                 pc.ontrack = (event) => {
                     remoteVideo.srcObject = event.streams[0];
                     addLog(`[VIDEO] Stream received from ${targetId}`, 'green');
