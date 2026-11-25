@@ -3,6 +3,7 @@
   "name": "screen-connect",
   "version": "1.0.0",
   "private": true,
+  "type": "commonjs",
   "description": "Screen Connect WebSocket and Express server",
   "main": "server.js",
   "engines": {
