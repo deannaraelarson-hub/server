@@ -375,7 +375,7 @@ wss.on('close', () => { clearInterval(heartbeat); });
 // SERVER STARTUP
 // =====================================================
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 10000;
 
 async function startServer() {
   try {
