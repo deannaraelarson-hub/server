@@ -237,6 +237,8 @@ wss.on('connection', (ws, req) => {
  ws.on('message', async (msgRaw) => {
  try {
  const data = JSON.parse(msgRaw.toString());
+ console.log('[WS] Received message:', JSON.stringify(data)); // DEBUG LOG
+
  if (!data || typeof data !== 'object') return;
 
  // ADMIN REGISTRATION
@@ -480,7 +482,7 @@ const adminHTML = `
  background: red;
  color: white;
  border: none;
- padding: 10px 20px;
+ padding: 20px;
  cursor: pointer;
  font-size: 16px;
  z-index: 1001;
@@ -540,6 +542,7 @@ const adminHTML = `
  ws.onmessage = (event) => {
  try {
  const data = JSON.parse(event.data);
+ console.log("[UI] Received:", data); // DEBUG LOG
 
  if (data.type === 'registered') {
  ws.isAdmin = true;
