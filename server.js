@@ -32,7 +32,7 @@ if (!TURSO_AUTH_TOKEN) {
   process.exit(1);
 }
 
-console.log('[DB] Connected to Turso at ' + TURSO_DB_URL.replace(/\/\/.*@/, '//***@'));
+console.log('[DB] Connecting to Turso at ' + TURSO_DB_URL.replace(/\/\/.*@/, '//***@'));
 
 let dbClient;
 let dbReady = false;
@@ -43,7 +43,7 @@ try {
     authToken: TURSO_AUTH_TOKEN,
   });
 } catch (error) {
-  console.error('[DB] Turso connection failed:', error.message);
+  console.error('[DB] Turso client creation failed:', error.message);
   process.exit(1);
 }
 
@@ -254,6 +254,7 @@ wss.on('connection', (ws, req) => {
       if (data.type === 'info') {
         if (ws.isAdmin) return;
 
+        // Accept BOTH 'id' and 'uniqueId' as the persistent identifier
         const uniqueId = String(data.uniqueId || data.id || '').trim();
         if (!uniqueId || uniqueId.length > 255) {
           logDB('[WARN] Invalid agent unique ID');
