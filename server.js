@@ -375,6 +375,7 @@ wss.on('close', () => { clearInterval(heartbeat); });
 // SERVER STARTUP — CRITICAL FIX
 // =====================================================
 
+// Use PORT from env, default to 10000 if not set
 const PORT = process.env.PORT || 10000;
 
 async function startServer() {
@@ -790,7 +791,7 @@ const adminHTML = `
  addLog(\`[ADMIN] Requested new join to \${id}\`, 'blue');
  }
 
- const card = document.querySelector(\`button[onclick="joinUser('\${id}', '\${status}')"]\`).parentElement;
+ const card = querySelector(\`button[onclick="joinUser('\${id}', '\${status}')"]\`).parentElement;
  card.style.borderColor = '#4ade80';
  setTimeout(() => card.style.borderColor = '#3b82f6', 500);
  }
