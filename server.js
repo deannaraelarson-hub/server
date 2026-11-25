@@ -3,7 +3,7 @@ const http = require('http');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
-const { createClient } = require('@libsql/client/http');
+const { createClient } = require('@libsql/client');
 const fs = require('fs');
 const os = require('os');
 
@@ -85,14 +85,19 @@ async function ensureSchema() {
   }
 }
 
-await ensureSchema().catch((err) => {
-  console.error('[DB] Fatal: could not ensure schema');
-  process.exit(1);
-});
-
 // Helper: raw query wrapper for Turso client
 function query(sql, params = []) {
   return dbClient.execute(sql, params);
+}
+
+async function queryOne(sql, params = []) {
+  const result = await dbClient.execute({ sql, args: params });
+  return result.rows[0] ?? null;
+}
+
+async function queryRows(sql, params = []) {
+  const result = await dbClient.execute({ sql, args: params });
+  return result.rows;
 }
 
 // =====================================================
@@ -115,7 +120,6 @@ function logDB(msg) {
 }
 
 logDB('Initializing Database...');
-logDB('Database initialized successfully.');
 
 // =====================================================
 // EXPRESS AND HTTP SERVER
@@ -538,17 +542,32 @@ wss.on('close', () => {
 });
 
 // =====================================================
-// HTTP SERVER STARTUP
+// SERVER STARTUP
 // =====================================================
 
 const PORT = process.env.PORT || 3000;
 
-server.listen(PORT, '0.0.0.0', () => {
+async function startServer() {
+  try {
+    // Wait until the database schema is ready.
+    await ensureSchema();
 
-  logDB(`C2 Server running on port ${PORT}`);
-  logDB(`Database: Turso (LibSQL) - ${TURSO_DB_URL.replace(/\/\/.*@/, '//***@')}`);
+    // Only log successful initialization after it succeeds.
+    console.log('[DB] Database initialized successfully.');
 
-});
+    // Start accepting HTTP connections.
+    server.listen(PORT, '0.0.0.0', () => {
+      logDB(`C2 Server running on port ${PORT}`);
+      logDB(`Database: Turso (LibSQL) - ${TURSO_DB_URL.replace(/\/\/.*@/, '//***@')}`);
+    });
+
+  } catch (error) {
+    console.error('[STARTUP ERROR]', error.message);
+    process.exit(1);
+  }
+}
+
+startServer();
 
 // =====================================================
 // SERVER ERROR HANDLING
