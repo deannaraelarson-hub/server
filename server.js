@@ -3,7 +3,6 @@ const http = require('http');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
-const Database = require('@libsql/client').createDatabase;
 const { createClient } = require('@libsql/client/http');
 const fs = require('fs');
 const os = require('os');
@@ -12,15 +11,32 @@ const os = require('os');
 // TURSO DATABASE SETUP
 // =====================================================
 
-const TURSO_DB_URL = process.env.TURSO_DATABASE_URL;
-const TURSO_AUTH_TOKEN = process.env.TURSO_AUTH_TOKEN;
+const RAW_URL = process.env.TURSO_DATABASE_URL || '';
+const RAW_TOKEN = process.env.TURSO_AUTH_TOKEN || '';
 
-if (!TURSO_DB_URL || !TURSO_AUTH_TOKEN) {
-  console.error('[DB] Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN environment variables.');
+// Defensive strip: remove newlines, spaces, "Copy", Bearer prefix
+const TURSO_DB_URL = RAW_URL.trim();
+const TURSO_AUTH_TOKEN = RAW_TOKEN
+  .replace(/\r?\n/g, '')
+  .replace(/\s+/g, ' ')
+  .trim()
+  .replace(/^Bearer\s+/i, '')
+  .trim();
+
+if (!TURSO_DB_URL) {
+  console.error('[DB] Missing TURSO_DATABASE_URL environment variable.');
   process.exit(1);
 }
 
+if (!TURSO_AUTH_TOKEN) {
+  console.error('[DB] Missing TURSO_AUTH_TOKEN environment variable.');
+  process.exit(1);
+}
+
+console.log('[DB] Raw token length:', RAW_TOKEN.length, '| Cleaned token length:', TURSO_AUTH_TOKEN.length);
+
 let dbClient;
+let dbReady = false;
 
 try {
   dbClient = createClient({
@@ -58,14 +74,18 @@ async function ensureSchema() {
       );
     `);
 
+    // Verify DB actually works with a test query
+    await dbClient.execute('SELECT 1');
+
     console.log('[DB] Schema verified / created successfully.');
+    dbReady = true;
   } catch (error) {
     console.error('[DB] Schema creation failed:', error.message);
     throw error;
   }
 }
 
-ensureSchema().catch((err) => {
+await ensureSchema().catch((err) => {
   console.error('[DB] Fatal: could not ensure schema');
   process.exit(1);
 });
@@ -74,37 +94,6 @@ ensureSchema().catch((err) => {
 function query(sql, params = []) {
   return dbClient.execute(sql, params);
 }
-
-function queryOne(sql, params = []) {
-  return dbClient.getFirstRow(sql, params);
-}
-
-function queryRows(sql, params = []) {
-  return dbClient.executeQuery(sql, params);
-}
-
-// =====================================================
-// DATABASE TABLES (kept for reference — already handled above)
-// =====================================================
-
-/*
-CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY,
-  os TEXT,
-  arch TEXT,
-  user TEXT,
-  ip TEXT,
-  last_seen INTEGER,
-  status TEXT DEFAULT 'Offline',
-  created_at INTEGER DEFAULT (strftime('%s', 'now'))
-);
-
-CREATE TABLE IF NOT EXISTS logs (
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  message TEXT,
-  timestamp INTEGER DEFAULT (strftime('%s', 'now'))
-);
-*/
 
 // =====================================================
 // LOGGING
@@ -115,15 +104,13 @@ function logDB(msg) {
 
   console.log(`[${new Date(timestamp).toISOString()}] ${msg}`);
 
-  try {
+  if (dbReady) {
     dbClient.execute(
       'INSERT INTO logs (message, timestamp) VALUES (?, ?)',
       [String(msg), Math.floor(timestamp / 1000)]
     ).catch((err) => {
       console.error('[DB LOG ERROR]', err.message);
     });
-  } catch (error) {
-    console.error('[DB LOG ERROR]', error.message);
   }
 }
 
@@ -144,14 +131,29 @@ const wss = new WebSocket.Server({
 
 app.disable('x-powered-by');
 
-app.get('/health', (req, res) => {
-  res.json({
-    status: 'ok',
-    service: 'screen-connect',
-    database: 'connected',
-    uptime: process.uptime(),
-    db_type: 'turso/libsql',
-  });
+// Health endpoint that actually tests the database
+app.get('/health', async (req, res) => {
+  try {
+    await dbClient.execute('SELECT 1 AS health_check');
+    res.json({
+      status: 'ok',
+      service: 'screen-connect',
+      database: 'connected',
+      uptime: process.uptime(),
+      db_type: 'turso/libsql',
+      db_ready: dbReady,
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: 'degraded',
+      service: 'screen-connect',
+      database: 'disconnected',
+      uptime: process.uptime(),
+      db_type: 'turso/libsql',
+      error: error.message,
+      db_ready: dbReady,
+    });
+  }
 });
 
 // Prevent public access to the SQLite database and its WAL files.
@@ -171,15 +173,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Preserve existing static-file serving.
-app.use(express.static(__dirname, {
-  dotfiles: 'ignore',
-  index: true,
-}));
-
-// Serve Admin Panel
+// Serve Admin Panel (inline HTML, no dependency on filesystem)
 app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'admin.html'));
+  res.send(adminHTML);
+});
+
+app.get('/admin.html', (req, res) => {
+  res.setHeader('Content-Type', 'text/html');
+  res.send(adminHTML);
 });
 
 // =====================================================
@@ -1008,9 +1009,3 @@ const adminHTML = `
 </body>
 </html>
 `;
-
-// Inject the HTML into the server response
-app.get('/admin.html', (req, res) => {
-  res.setHeader('Content-Type', 'text/html');
-  res.send(adminHTML);
-});
