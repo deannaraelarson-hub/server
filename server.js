@@ -1287,13 +1287,13 @@ const adminHTML = `
                     </div>
                 `;
                 grid.appendChild(card);
-            
+
 
             document.getElementById('totalUsers').innerText = total;
             document.getElementById('onlineUsers').innerText = online;
             document.getElementById('offlineUsers').innerText = offline;
             document.getElementById('activeSessions').innerText = activeSessions;
-        }
+     
 
         function openSession(machineId, data) {
             document.getElementById('modalMachineName').innerText = \`\${machineId} - \${data.serialNumber}\`;
