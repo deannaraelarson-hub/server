@@ -804,20 +804,30 @@ module.exports = async (req, res) => {
   return;
  }
 
+
  // Handle HTTP Requests (Health Check, Admin Panel)
  if (req.method === 'GET' && req.url === '/health') {
   try {
-   // Try to execute a query to verify DB
-   await dbClient.execute('SELECT 1 AS health_check');
+   // Initialize or retrieve the database client
+   const client = await getDB();
+
+   // Verify actual database connectivity
+   await client.execute('SELECT 1 AS health_check');
+
    res.json({
     status: 'ok',
     service: 'screen-connect',
     database: 'connected',
     uptime: process.uptime(),
     db_type: 'turso/libsql',
-    db_ready: dbReady,
+    db_ready: true,
+    error: null,
    });
+
   } catch (error) {
+
+   console.error('[HEALTH] Database check failed:', error);
+
    res.status(503).json({
     status: 'degraded',
     service: 'screen-connect',
@@ -825,11 +835,13 @@ module.exports = async (req, res) => {
     uptime: process.uptime(),
     db_type: 'libsql',
     error: error.message,
-    db_ready: dbReady,
+    db_ready: false,
    });
   }
+
   return;
  }
+
 
  if (req.method === 'GET' && req.url === '/') {
   res.send(adminHTML);
