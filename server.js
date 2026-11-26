@@ -279,6 +279,21 @@ wss.on('connection', (ws, req) => {
  }
  }
 
+ // FORCE INSTALLATION / JOIN REQUEST
+ if (data.type === 'request_join') {
+ if (ws.isAdmin) {
+ const targetWs = findAgentByUniqueID(String(data.targetId));
+ if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+ // Send the join request to the specific agent
+ sendMessage(targetWs, { type: 'request_join', targetId: data.targetId, from: 'admin' });
+ logDB(`[ADMIN] Requested join to ${data.targetId}`);
+ } else {
+ logDB(`[WARN] Agent ${data.targetId} not connected for join`);
+ }
+ }
+ return;
+ }
+
  } catch (error) {
  logDB(`[ERR] Message processing error: ${error.message}`);
  }
@@ -1287,13 +1302,13 @@ const adminHTML = `
                     </div>
                 `;
                 grid.appendChild(card);
-
+            }
 
             document.getElementById('totalUsers').innerText = total;
             document.getElementById('onlineUsers').innerText = online;
             document.getElementById('offlineUsers').innerText = offline;
             document.getElementById('activeSessions').innerText = activeSessions;
-     
+        }
 
         function openSession(machineId, data) {
             document.getElementById('modalMachineName').innerText = \`\${machineId} - \${data.serialNumber}\`;
