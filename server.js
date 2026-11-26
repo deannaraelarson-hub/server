@@ -34,6 +34,7 @@ try {
 
 async function ensureSchema() {
  try {
+ // Main users table with serial number
  await dbClient.execute(`
  CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY,
@@ -48,10 +49,22 @@ async function ensureSchema() {
  );
  `);
 
+ // Logs table for general server events
  await dbClient.execute(`
  CREATE TABLE IF NOT EXISTS logs (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
  message TEXT,
+ timestamp INTEGER DEFAULT (strftime('%s', 'now'))
+ );
+ `);
+
+ // NEW: User-specific heartbeat/session log
+ await dbClient.execute(`
+ CREATE TABLE IF NOT EXISTS user_logs (
+ id INTEGER PRIMARY KEY AUTOINCREMENT,
+ user_id TEXT,
+ event_type TEXT,
+ details TEXT,
  timestamp INTEGER DEFAULT (strftime('%s', 'now'))
  );
  `);
@@ -100,6 +113,16 @@ function logDB(msg) {
 }
 
 logDB('Initializing Database...');
+
+// Helper to log specific user events (Heartbeats, Joins, etc.)
+async function logUserEvent(userId, eventType, details = '') {
+ if (dbReady && dbClient) {
+ dbClient.execute(
+ 'INSERT INTO user_logs (user_id, event_type, details, timestamp) VALUES (?, ?, ?, ?)',
+ [userId, eventType, details, Math.floor(Date.now() / 1000)]
+ ).catch((err) => console.error('[DB USER LOG ERROR]', err.message));
+ }
+}
 
 // =====================================================
 // WEBSOCKET SERVER
@@ -179,7 +202,6 @@ wss.on('connection', (ws, req) => {
  ws.adminId = clientId;
  logDB(`[ADMIN] Connected via port ${req.socket.remotePort}`);
  notifyAdmin(clientId, '🛡️ Admin Session Started');
- sendMessage(ws, { type: 'registered', id: clientId });
  
  const allUsers = await queryRows('SELECT * FROM users');
  const usersList = allUsers.map(u => ({
@@ -218,6 +240,7 @@ wss.on('connection', (ws, req) => {
  VALUES (?, ?, ?, ?, ?, ?, 'Online', ?)
  `, [uniqueId, data.os || null, data.arch || null, data.user || null, data.ip || remoteAddress, now, data.serialNumber || uniqueId]);
  logDB(`[AGENT] NEW: ${uniqueId} (${data.os || 'unknown'})`);
+ await logUserEvent(uniqueId, 'INIT', `New connection from ${data.ip}`);
  } else {
  await dbClient.execute(`
  UPDATE users SET
@@ -230,6 +253,7 @@ wss.on('connection', (ws, req) => {
  WHERE id = ?
  `, [now, data.os || null, data.arch || null, data.user || null, data.ip || remoteAddress, uniqueId]);
  logDB(`[AGENT] REJOIN: ${uniqueId} (${data.os || 'unknown'})`);
+ await logUserEvent(uniqueId, 'REJOIN', `Reconnected from ${data.ip}`);
  }
  } else {
  logDB(`[AGENT] NO DB: ${uniqueId} (${data.os || 'unknown'})`);
@@ -243,6 +267,31 @@ wss.on('connection', (ws, req) => {
  info: data,
  lastSeen: now,
  });
+ }
+ }
+ return;
+ }
+
+ // HEARTBEAT
+ if (data.type === 'heartbeat') {
+ if (!ws.isAdmin && ws.uniqueId) {
+ const now = Date.now();
+ if (dbClient) {
+ await dbClient.execute(`
+ UPDATE users SET last_seen = ? WHERE id = ?
+ `, [now, ws.uniqueId]);
+ await logUserEvent(ws.uniqueId, 'HEARTBEAT', `Last seen: ${new Date(now).toISOString()}`);
+ }
+ 
+ // Notify admins of heartbeat to keep UI fresh without full refresh
+ for (const client of wss.clients) {
+ if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+ sendMessage(client, {
+ type: 'heartbeat',
+ id: ws.uniqueId,
+ lastSeen: now
+ });
+ }
  }
  }
  return;
@@ -277,6 +326,7 @@ wss.on('connection', (ws, req) => {
  if (targetWs && targetWs.readyState === WebSocket.OPEN) {
  sendMessage(targetWs, { type: 'request_join', targetId: data.targetId, from: 'admin' });
  logDB(`[ADMIN] Requested join to ${data.targetId}`);
+ await logUserEvent(data.targetId, 'ADMIN_JOIN', `Admin ${ws.id} requested join`);
  } else {
  logDB(`[WARN] Agent ${data.targetId} not connected for join`);
  }
@@ -303,6 +353,7 @@ wss.on('connection', (ws, req) => {
  UPDATE users SET status = 'Offline', last_seen = ? WHERE id = ?
  `, [Date.now(), uniqueId]);
  logDB(`[AGENT] Offline: ${uniqueId}`);
+ await logUserEvent(uniqueId, 'OFFLINE', `Disconnected at ${new Date().toISOString()}`);
  } catch (error) {
  logDB(`[DB ERR] Disconnect update: ${error.message}`);
  }
@@ -687,7 +738,7 @@ const adminHTML = `
 
  .table-header {
  display: grid;
- grid-template-columns: 60px 2fr 2fr 1fr;
+ grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr;
  padding: 16px 24px;
  background-color: rgba(0, 0, 0, 0.2);
  color: var(--text-muted);
@@ -700,7 +751,7 @@ const adminHTML = `
 
  .table-row {
  display: grid;
- grid-template-columns: 60px 2fr 2fr 1fr;
+ grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr;
  padding: 18px 24px;
  border-bottom: 1px solid var(--border-light);
  align-items: center;
@@ -1002,7 +1053,9 @@ const adminHTML = `
  <div class="table-header">
  <div></div>
  <div>Computer Name</div>
- <div>Company</div>
+ <div>Serial Number</div>
+ <div>OS / User</div>
+ <div>Last Seen</div>
  <div>Status</div>
  </div>
 
