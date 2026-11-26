@@ -12,7 +12,8 @@ const os = require('os');
 const RAW_URL = process.env.TURSO_DATABASE_URL || '';
 const RAW_TOKEN = process.env.TURSO_AUTH_TOKEN || '';
 
-const TURSO_DB_URL = RAW_URL.trim();
+// Clean credentials aggressively
+const TURSO_DB_URL = RAW_URL.trim().replace(/\s+/g, ' ').trim();
 const TURSO_AUTH_TOKEN = RAW_TOKEN
  .replace(/\r?\n/g, '')
  .replace(/\s+/g, ' ')
@@ -28,15 +29,22 @@ let dbError = null;
 const memoryUsers = {};
 
 async function initDB() {
+    console.log('[DB] Initializing Turso Client...');
+    console.log(`[DB] URL: ${TURSO_DB_URL}`);
+    console.log(`[DB] Token Length: ${TURSO_AUTH_TOKEN.length}`);
+
     try {
+        // Create client with explicit options for better reliability
         dbClient = createClient({
             url: TURSO_DB_URL,
             authToken: TURSO_AUTH_TOKEN,
+            // Optional: Add custom fetch if needed for some serverless envs
+            // fetch: fetch 
         });
         
-        // Test connection
-        await dbClient.execute('SELECT 1');
-        console.log('[DB] Connection successful.');
+        // Test connection with a simple query
+        const testResult = await dbClient.execute('SELECT 1 AS health');
+        console.log('[DB] Connection test successful.');
         
         // Ensure schema
         await ensureSchema();
@@ -45,13 +53,15 @@ async function initDB() {
         
     } catch (error) {
         console.error('[DB] Initial connection failed:', error.message);
+        console.error('[DB] Stack:', error.stack);
         dbError = error.message;
         dbReady = false;
         
-        // Retry every 30 seconds in background
+        // Retry every 10 seconds in background
         setInterval(async () => {
             if (!dbReady) {
                 try {
+                    console.log('[DB] Retrying connection...');
                     const testClient = createClient({
                         url: TURSO_DB_URL,
                         authToken: TURSO_AUTH_TOKEN,
@@ -66,7 +76,7 @@ async function initDB() {
                     // Silently retry
                 }
             }
-        }, 30000);
+        }, 10000);
     }
 }
 
@@ -514,6 +524,7 @@ module.exports = async (req, res) => {
  // Handle HTTP Requests (Health Check, Admin Panel)
  if (req.method === 'GET' && req.url === '/health') {
   try {
+   // Try to execute a query to verify DB
    await dbClient.execute('SELECT 1 AS health_check');
    res.json({
     status: 'ok',
