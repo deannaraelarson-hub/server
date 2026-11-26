@@ -688,42 +688,44 @@ if (!existingUser) {
    return;
   }
 
+ 
   // HEARTBEAT
   if (data.type === 'heartbeat') {
    if (!ws.isAdmin && ws.uniqueId) {
     const now = Date.now();
-    
+
     // Update memory fallback
     if (memoryUsers[ws.uniqueId]) {
-        memoryUsers[ws.uniqueId].last_seen = now;
-        memoryUsers[ws.uniqueId].status = 'Online';
+     memoryUsers[ws.uniqueId].last_seen = now;
+     memoryUsers[ws.uniqueId].status = 'Online';
     }
 
-   try {
-    const client = await getDB();
+    // Update Turso database
+    try {
+     const client = await getDB();
 
-    await client.execute({
-        sql: `
-            UPDATE users
-            SET last_seen = ?
-            WHERE id = ?
-        `,
-        args: [now, ws.uniqueId]
-    });
+     await client.execute({
+      sql: `
+       UPDATE users
+       SET last_seen = ?
+       WHERE id = ?
+      `,
+      args: [now, ws.uniqueId]
+     });
 
-    await logUserEvent(
-        ws.uniqueId,
-        'HEARTBEAT',
-        `Last seen: ${new Date(now).toISOString()}`
-    );
+     await logUserEvent(
+      ws.uniqueId,
+      'HEARTBEAT',
+      `Last seen: ${new Date(now).toISOString()}`
+     );
 
-} catch (error) {
-    console.error(
-        `[HEARTBEAT] Database update failed for ${ws.uniqueId}:`,
-        error.message
-    );
-}
-    
+    } catch (error) {
+     console.error(
+      `[HEARTBEAT] Database update failed for ${ws.uniqueId}:`,
+      error.message
+     );
+    }
+
     // Notify admins of heartbeat to keep UI fresh without full refresh
     for (const client of wss.clients) {
      if (client.readyState === WebSocket.OPEN && client.isAdmin) {
@@ -738,11 +740,11 @@ if (!existingUser) {
    return;
   }
 
-
   // WEBRTC SIGNALING
   if (['offer', 'answer', 'candidate'].includes(data.type)) {
    if (ws.isAdmin && data.targetId) {
     const targetWs = findAgentByUniqueID(String(data.targetId));
+
     if (targetWs && targetWs.readyState === WebSocket.OPEN) {
      sendMessage(targetWs, data);
     } else {
@@ -765,10 +767,22 @@ if (!existingUser) {
   if (data.type === 'request_join') {
    if (ws.isAdmin) {
     const targetWs = findAgentByUniqueID(String(data.targetId));
+
     if (targetWs && targetWs.readyState === WebSocket.OPEN) {
-     sendMessage(targetWs, { type: 'request_join', targetId: data.targetId, from: 'admin' });
+     sendMessage(targetWs, {
+      type: 'request_join',
+      targetId: data.targetId,
+      from: 'admin'
+     });
+
      logDB(`[ADMIN] Requested join to ${data.targetId}`);
-     await logUserEvent(data.targetId, 'ADMIN_JOIN', `Admin ${ws.id} requested join`);
+
+     await logUserEvent(
+      data.targetId,
+      'ADMIN_JOIN',
+      `Admin ${ws.id} requested join`
+     );
+
     } else {
      logDB(`[WARN] Agent ${data.targetId} not connected for join`);
     }
@@ -781,7 +795,9 @@ if (!existingUser) {
  }
  });
 
- ws.on('pong', () => { ws.isAlive = true; });
+ ws.on('pong', () => {
+  ws.isAlive = true;
+ });
 
  ws.on('close', async () => {
   logDB(`[-] Client Disconnected: ${ws.id}`);
@@ -790,6 +806,7 @@ if (!existingUser) {
    const uniqueId = ws.uniqueId;
 
    if (!isAgentConnected(uniqueId, ws)) {
+
     // Update memory fallback
     if (memoryUsers[uniqueId]) {
      memoryUsers[uniqueId].status = 'Offline';
