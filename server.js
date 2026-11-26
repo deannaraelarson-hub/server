@@ -94,7 +94,7 @@ async function ensureSchema(client) {
  throw new Error('Cannot create schema: Turso client unavailable.');
  }
 
- // USERS TABLE - EXISTING STRUCTURE PRESERVED
+ // USERS TABLE - EXISTING STRUCTURE PRESERVED + FINGERPRINT
  await client.execute(`
  CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY,
@@ -105,7 +105,8 @@ async function ensureSchema(client) {
  last_seen INTEGER,
  status TEXT DEFAULT 'Offline',
  created_at INTEGER DEFAULT (strftime('%s', 'now')),
- serial_number TEXT
+ serial_number TEXT,
+ fingerprint TEXT -- NEW COLUMN
  );
  `);
 
@@ -476,7 +477,8 @@ wss.on('connection', (ws, req) => {
  ip: u.ip,
  last_seen: u.last_seen,
  status: u.status,
- serial_number: u.serial_number
+ serial_number: u.serial_number,
+ fingerprint: u.fingerprint
  }));
  }
 
@@ -488,7 +490,8 @@ wss.on('connection', (ws, req) => {
  ip: u.ip,
  last_seen: u.last_seen,
  status: u.status,
- serial_number: u.serial_number
+ serial_number: u.serial_number,
+ fingerprint: u.fingerprint
  }));
  
  // Send the full list to the admin
@@ -518,7 +521,8 @@ wss.on('connection', (ws, req) => {
  ip: data.ip || remoteAddress,
  last_seen: now,
  status: 'Online',
- serial_number: data.serialNumber || uniqueId
+ serial_number: data.serialNumber || uniqueId,
+ fingerprint: data.fingerprint || uniqueId
  };
 
  if (dbClient && dbReady) {
@@ -530,9 +534,9 @@ wss.on('connection', (ws, req) => {
  await client.execute({
  sql: `
  INSERT INTO users (
- id, os, arch, user, ip, last_seen, status, serial_number
+ id, os, arch, user, ip, last_seen, status, serial_number, fingerprint
  )
- VALUES (?, ?, ?, ?, ?, ?, 'Online', ?)
+ VALUES (?, ?, ?, ?, ?, ?, 'Online', ?, ?)
  `,
  args: [
  uniqueId,
@@ -541,7 +545,8 @@ wss.on('connection', (ws, req) => {
  data.user || null,
  data.ip || remoteAddress,
  now,
- data.serialNumber || uniqueId
+ data.serialNumber || uniqueId,
+ data.fingerprint || uniqueId
  ]
  });
 
@@ -561,7 +566,9 @@ wss.on('connection', (ws, req) => {
  os = COALESCE(?, os),
  arch = COALESCE(?, arch),
  user = COALESCE(?, user),
- ip = COALESCE(?, ip)
+ ip = COALESCE(?, ip),
+ serial_number = COALESCE(?, serial_number),
+ fingerprint = COALESCE(?, fingerprint)
  WHERE id = ?
  `,
  args: [
@@ -570,6 +577,8 @@ wss.on('connection', (ws, req) => {
  data.arch || null,
  data.user || null,
  data.ip || remoteAddress,
+ data.serialNumber || null,
+ data.fingerprint || null,
  uniqueId
  ]
  });
@@ -590,6 +599,7 @@ wss.on('connection', (ws, req) => {
  id: uniqueId,
  info: data,
  lastSeen: now,
+ fingerprint: data.fingerprint || uniqueId
  });
  }
  }
@@ -1138,7 +1148,7 @@ const adminHTML = `
 
  .table-header {
  display: grid;
- grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr;
+ grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr 1fr;
  padding: 16px 24px;
  background-color: rgba(0, 0, 0, 0.2);
  color: var(--text-muted);
@@ -1151,7 +1161,7 @@ const adminHTML = `
 
  .table-row {
  display: grid;
- grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr;
+ grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr 1fr;
  padding: 18px 24px;
  border-bottom: 1px solid var(--border-light);
  align-items: center;
@@ -1453,10 +1463,11 @@ const adminHTML = `
  <div class="table-header">
  <div></div>
  <div>Computer Name</div>
- <div>Serial Number</div>
+ <div>Fingerprint</div>
  <div>OS / User</div>
  <div>Last Seen</div>
  <div>Status</div>
+ <div>Action</div>
  </div>
 
  <div id="table-body">
@@ -1533,7 +1544,7 @@ const adminHTML = `
  info: { os: user.os, user: user.user },
  lastSeen: user.last_seen * 1000,
  sessionActive: false,
- serialNumber: user.serial_number,
+ fingerprint: user.fingerprint,
  ip: user.ip
  };
  });
@@ -1546,7 +1557,7 @@ const adminHTML = `
  info: data.info,
  lastSeen: data.lastSeen,
  sessionActive: false,
- serialNumber: data.info.serialNumber || 'N/A',
+ fingerprint: data.fingerprint,
  ip: data.info.ip || 'Unknown'
  };
  } else {
@@ -1691,20 +1702,21 @@ const adminHTML = `
  row.onclick = () => openSession(id);
  
  const lastSeenStr = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'Never';
- 
+
  row.innerHTML = \`
  <div class="custom-checkbox"></div>
  <div class="machine-info">
  <div class="name"><i class="fa-solid fa-desktop"></i> \${id}</div>
  <div class="company">\${data.info.user || 'Unknown User'} | \${data.info.os || 'Unknown OS'}</div>
  </div>
- <div>\${data.serialNumber || 'N/A'}</div>
+ <div style="font-size: 0.8rem; color: var(--text-muted); font-family: monospace;">\${data.fingerprint || 'N/A'}</div>
  <div>\${data.info.os || 'N/A'} / \${data.info.user || 'N/A'}</div>
  <div>\${lastSeenStr}</div>
  <div class="status">
  <div class="status-dot \${data.status === 'Online' ? 'online' : 'offline'}"></div>
  <span>\${data.status}</span>
  </div>
+ <div><button class="tool-btn" style="width: auto; padding: 4px 8px; font-size: 0.8rem;" onclick="event.stopPropagation(); openSession('\${id}')">Join</button></div>
  \`;
  
  grid.appendChild(row);
@@ -1723,8 +1735,9 @@ const adminHTML = `
  rows.forEach(row => {
  const name = row.querySelector('.machine-info .name').textContent.toLowerCase();
  const user = row.querySelector('.machine-info .company').textContent.toLowerCase();
+ const fp = row.children[2].textContent.toLowerCase();
  
- if (name.includes(input) || user.includes(input)) {
+ if (name.includes(input) || user.includes(input) || fp.includes(input)) {
  row.style.display = '';
  } else {
  row.style.display = 'none';
