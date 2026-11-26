@@ -34,7 +34,7 @@ try {
 
 async function ensureSchema() {
  try {
- // Main users table with serial number
+ // Ensure users table has serial_number column
  await dbClient.execute(`
  CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY,
@@ -203,7 +203,8 @@ wss.on('connection', (ws, req) => {
  logDB(`[ADMIN] Connected via port ${req.socket.remotePort}`);
  notifyAdmin(clientId, '🛡️ Admin Session Started');
  
- const allUsers = await queryRows('SELECT * FROM users');
+ // CRITICAL: Fetch ALL users from DB immediately
+ const allUsers = await queryRows('SELECT * FROM users ORDER BY last_seen DESC');
  const usersList = allUsers.map(u => ({
  id: u.id,
  os: u.os,
@@ -214,6 +215,8 @@ wss.on('connection', (ws, req) => {
  status: u.status,
  serial_number: u.serial_number
  }));
+ 
+ // Send the full list to the admin
  sendMessage(ws, { type: 'init_users', users: usersList });
  return;
  }
@@ -259,6 +262,7 @@ wss.on('connection', (ws, req) => {
  logDB(`[AGENT] NO DB: ${uniqueId} (${data.os || 'unknown'})`);
  }
 
+ // Notify all admins about this user update
  for (const client of wss.clients) {
  if (client.readyState === WebSocket.OPEN && client.isAdmin) {
  sendMessage(client, {
