@@ -1,12 +1,7 @@
-// pages/api/server.js
-const { createServer } = require('http');
-const { parse } = require('url');
-const next = require('next');
-const express = require('express');
+// api/server.js
 const http = require('http');
 const WebSocket = require('ws');
 const { v4: uuidv4 } = require('uuid');
-const path = require('path');
 const { createClient } = require('@libsql/client');
 const fs = require('fs');
 const os = require('os');
@@ -28,8 +23,6 @@ const TURSO_AUTH_TOKEN = RAW_TOKEN
 
 if (!TURSO_DB_URL) {
  console.error('[DB] Missing TURSO_DATABASE_URL environment variable.');
- // In Vercel, we might continue without DB if env vars are missing, 
- // but for production, ensure they are set.
 }
 
 if (!TURSO_AUTH_TOKEN) {
@@ -48,7 +41,6 @@ try {
  });
 } catch (error) {
  console.error('[DB] Turso client creation failed:', error.message);
- // Continue without DB if connection fails
 }
 
 async function ensureSchema() {
@@ -328,18 +320,15 @@ const heartbeat = setInterval(() => {
 wss.on('close', () => { clearInterval(heartbeat); });
 
 // =====================================================
-// SERVER STARTUP — CRITICAL FIX FOR VERCEL
+// SERVER STARTUP — VERCEL SERVERLESS FUNCTION
 // =====================================================
-
-// Vercel passes the request to this function.
-// We need to handle the WebSocket upgrade manually.
 
 module.exports = async (req, res) => {
  // Handle WebSocket Upgrade
  const upgradeHeader = req.headers['upgrade'] || '';
  if (upgradeHeader.toLowerCase() === 'websocket') {
  // Parse the URL
- const url = parse(req.url);
+ const url = new URL(req.url, `http://${req.headers.host}`);
  
  // Create a dummy response object for the WebSocket server
  const dummyRes = {
