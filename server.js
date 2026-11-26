@@ -615,31 +615,65 @@ wss.on('connection', (ws, req) => {
    if (dbClient && dbReady) {
     const existingUser = await queryOne('SELECT * FROM users WHERE id = ?', [uniqueId]);
 
-    if (!existingUser) {
-     await dbClient.execute(`
-      INSERT INTO users (id, os, arch, user, ip, last_seen, status, serial_number)
-      VALUES (?, ?, ?, ?, ?, ?, 'Online', ?)
-     `, [uniqueId, data.os || null, data.arch || null, data.user || null, data.ip || remoteAddress, now, data.serialNumber || uniqueId]);
-     logDB(`[AGENT] NEW: ${uniqueId} (${data.os || 'unknown'})`);
-     await logUserEvent(uniqueId, 'INIT', `New connection from ${data.ip}`);
-    } else {
-     await dbClient.execute(`
-      UPDATE users SET
-      last_seen = ?,
-      status = 'Online',
-      os = COALESCE(?, os),
-      arch = COALESCE(?, arch),
-      user = COALESCE(?, user),
-      ip = COALESCE(?, ip)
-      WHERE id = ?
-     `, [now, data.os || null, data.arch || null, data.user || null, data.ip || remoteAddress, uniqueId]);
-     logDB(`[AGENT] REJOIN: ${uniqueId} (${data.os || 'unknown'})`);
-     await logUserEvent(uniqueId, 'REJOIN', `Reconnected from ${data.ip}`);
-    }
-   } else {
-    logDB(`[AGENT] NO DB: ${uniqueId} (${data.os || 'unknown'}) - Stored in memory`);
-   }
+    const client = await getDB();
 
+if (!existingUser) {
+    await client.execute({
+        sql: `
+            INSERT INTO users (
+                id, os, arch, user, ip, last_seen, status, serial_number
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 'Online', ?)
+        `,
+        args: [
+            uniqueId,
+            data.os || null,
+            data.arch || null,
+            data.user || null,
+            data.ip || remoteAddress,
+            now,
+            data.serialNumber || uniqueId
+        ]
+    });
+
+    logDB(`[AGENT] NEW: ${uniqueId} (${data.os || 'unknown'})`);
+
+    await logUserEvent(
+        uniqueId,
+        'INIT',
+        `New connection from ${data.ip || remoteAddress}`
+    );
+
+} else {
+    await client.execute({
+        sql: `
+            UPDATE users SET
+                last_seen = ?,
+                status = 'Online',
+                os = COALESCE(?, os),
+                arch = COALESCE(?, arch),
+                user = COALESCE(?, user),
+                ip = COALESCE(?, ip)
+            WHERE id = ?
+        `,
+        args: [
+            now,
+            data.os || null,
+            data.arch || null,
+            data.user || null,
+            data.ip || remoteAddress,
+            uniqueId
+        ]
+    });
+
+    logDB(`[AGENT] REJOIN: ${uniqueId} (${data.os || 'unknown'})`);
+
+    await logUserEvent(
+        uniqueId,
+        'REJOIN',
+        `Reconnected from ${data.ip || remoteAddress}`
+    );
+}
    // Notify all admins about this user update
    for (const client of wss.clients) {
     if (client.readyState === WebSocket.OPEN && client.isAdmin) {
@@ -665,12 +699,30 @@ wss.on('connection', (ws, req) => {
         memoryUsers[ws.uniqueId].status = 'Online';
     }
 
-    if (dbClient && dbReady) {
-     await dbClient.execute(`
-      UPDATE users SET last_seen = ? WHERE id = ?
-     `, [now, ws.uniqueId]);
-     await logUserEvent(ws.uniqueId, 'HEARTBEAT', `Last seen: ${new Date(now).toISOString()}`);
-    }
+   try {
+    const client = await getDB();
+
+    await client.execute({
+        sql: `
+            UPDATE users
+            SET last_seen = ?
+            WHERE id = ?
+        `,
+        args: [now, ws.uniqueId]
+    });
+
+    await logUserEvent(
+        ws.uniqueId,
+        'HEARTBEAT',
+        `Last seen: ${new Date(now).toISOString()}`
+    );
+
+} catch (error) {
+    console.error(
+        `[HEARTBEAT] Database update failed for ${ws.uniqueId}:`,
+        error.message
+    );
+}
     
     // Notify admins of heartbeat to keep UI fresh without full refresh
     for (const client of wss.clients) {
@@ -742,19 +794,31 @@ wss.on('connection', (ws, req) => {
         memoryUsers[uniqueId].last_seen = Date.now();
     }
 
-    if (dbClient && dbReady) {
-     try {
-      await dbClient.execute(`
-       UPDATE users SET status = 'Offline', last_seen = ? WHERE id = ?
-      `, [Date.now(), uniqueId]);
-      logDB(`[AGENT] Offline: ${uniqueId}`);
-      await logUserEvent(uniqueId, 'OFFLINE', `Disconnected at ${new Date().toISOString()}`);
-     } catch (error) {
-      logDB(`[DB ERR] Disconnect update: ${error.message}`);
-     }
-    }
+      try {
+    const client = await getDB();
+
+    await client.execute({
+     sql: `
+      UPDATE users
+      SET status = 'Offline', last_seen = ?
+      WHERE id = ?
+     `,
+     args: [Date.now(), uniqueId]
+    });
+
+    logDB(`[AGENT] Offline: ${uniqueId}`);
+
+    await logUserEvent(
+     uniqueId,
+     'OFFLINE',
+     `Disconnected at ${new Date().toISOString()}`
+    );
+
+   } catch (error) {
+    logDB(`[DB ERR] Disconnect update: ${error.message}`);
    }
   }
+ }
 
   broadcastToAdmins(ws, { type: 'refresh_users' });
  });
