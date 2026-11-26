@@ -8,18 +8,18 @@ const os = require('os');
 // =====================================================
 // TURSO DATABASE SETUP
 
+
 // =====================================================
 // TURSO DATABASE SETUP - VERCEL OPTIMIZED
+// EXISTING DATABASE SCHEMA PRESERVED
 // =====================================================
 
 const RAW_URL = process.env.TURSO_DATABASE_URL || '';
 const RAW_TOKEN = process.env.TURSO_AUTH_TOKEN || '';
 
-// Clean credentials
 const TURSO_DB_URL = RAW_URL.trim();
 
 const TURSO_AUTH_TOKEN = RAW_TOKEN
-    .replace(/\s+/g, '')
     .replace(/^Bearer\s*/i, '')
     .trim();
 
@@ -27,25 +27,24 @@ let dbClient = null;
 let dbReady = false;
 let dbError = null;
 
-// Prevent multiple simultaneous initialization attempts
+// Prevent simultaneous initialization attempts
 let dbInitPromise = null;
 
-// In-memory fallback for users if DB is unavailable
+// Preserve existing in-memory variable
 const memoryUsers = {};
 
-// Retry configuration
+// Connection initialization retries
 const DB_MAX_RETRIES = 4;
 
 const DB_RETRY_DELAYS = [
     1000,
     2000,
-    4000,
-    8000
+    4000
 ];
 
 
 // =====================================================
-// DATABASE ERROR HANDLING
+// DATABASE ERROR LOGGING
 // =====================================================
 
 function logDBError(context, error) {
@@ -59,7 +58,10 @@ function logDBError(context, error) {
 }
 
 
-// Identify temporary network/connection errors
+// =====================================================
+// IDENTIFY CONNECTION ERRORS
+// =====================================================
+
 function isConnectionError(error) {
     const message = [
         error?.message,
@@ -92,15 +94,18 @@ function isConnectionError(error) {
 
 // =====================================================
 // DATABASE SCHEMA
+// IMPORTANT: DO NOT CHANGE EXISTING TABLE STRUCTURE
 // =====================================================
 
-async function ensureSchema(client = dbClient) {
+async function ensureSchema(client) {
 
     if (!client) {
-        throw new Error('Cannot create schema: Turso client unavailable.');
+        throw new Error(
+            'Cannot create schema: Turso client unavailable.'
+        );
     }
 
-    // USERS TABLE
+    // USERS TABLE - EXISTING STRUCTURE PRESERVED
     await client.execute(`
         CREATE TABLE IF NOT EXISTS users (
             id TEXT PRIMARY KEY,
@@ -115,7 +120,7 @@ async function ensureSchema(client = dbClient) {
         );
     `);
 
-    // LOGS TABLE
+    // LOGS TABLE - EXISTING STRUCTURE PRESERVED
     await client.execute(`
         CREATE TABLE IF NOT EXISTS logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,7 +129,7 @@ async function ensureSchema(client = dbClient) {
         );
     `);
 
-    // USER SESSION LOGS TABLE
+    // USER LOGS TABLE - EXISTING STRUCTURE PRESERVED
     await client.execute(`
         CREATE TABLE IF NOT EXISTS user_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -135,43 +140,17 @@ async function ensureSchema(client = dbClient) {
         );
     `);
 
-    // Check older users tables for serial_number column
-    const columns = await client.execute(
-        'PRAGMA table_info(users)'
-    );
+    // Verify database responds
+    await client.execute('SELECT 1 AS schema_check');
 
-    const hasSerialNumber = columns.rows.some(
-        column => column.name === 'serial_number'
-    );
-
-    if (!hasSerialNumber) {
-        try {
-            await client.execute(
-                'ALTER TABLE users ADD COLUMN serial_number TEXT'
-            );
-
-            console.log('[DB] Added missing serial_number column.');
-
-        } catch (error) {
-            // Another serverless instance may have added it
-            // between our PRAGMA check and ALTER TABLE.
-            if (!/duplicate column/i.test(error.message || '')) {
-                throw error;
-            }
-        }
-    }
-
-    // Verify schema
-    await client.execute('SELECT 1');
-
-    console.log('[DB] Schema verified / created successfully.');
+    console.log('[DB] Existing database schema verified.');
 
     return true;
 }
 
 
 // =====================================================
-// TURSO CONNECTION
+// CREATE AND TEST TURSO CONNECTION
 // =====================================================
 
 async function connectTurso() {
@@ -182,46 +161,45 @@ async function connectTurso() {
         );
     }
 
-    console.log('[DB] Initializing Turso client...');
+    console.log('[DB] Creating Turso client...');
 
     const client = createClient({
         url: TURSO_DB_URL,
         authToken: TURSO_AUTH_TOKEN
     });
 
-    // Test actual database connectivity
+    // Test actual connection
     await client.execute('SELECT 1 AS health');
 
-    console.log('[DB] Connection test successful.');
+    console.log('[DB] Turso connection test successful.');
 
-    // Set client before schema initialization
-    dbClient = client;
-
-    // Verify/create all required tables
+    // Verify existing tables without modifying their structure
     await ensureSchema(client);
 
-    // Mark ready only after successful schema creation
+    // Only mark client ready after all checks succeed
+    dbClient = client;
     dbReady = true;
     dbError = null;
 
-    console.log('[DB] Database ready and verified.');
+    console.log('[DB] Database connection ready.');
 
     return client;
 }
 
 
 // =====================================================
-// DATABASE INITIALIZATION WITH RETRIES
+// INITIALIZE DATABASE
+// LAZY INITIALIZATION FOR VERCEL
 // =====================================================
 
 async function initDB() {
 
-    // Return existing healthy connection
+    // Reuse an already initialized client
     if (dbReady && dbClient) {
         return dbClient;
     }
 
-    // Reuse initialization already in progress
+    // Reuse an initialization already in progress
     if (dbInitPromise) {
         return dbInitPromise;
     }
@@ -229,8 +207,8 @@ async function initDB() {
     dbInitPromise = (async () => {
 
         console.log('[DB] Starting database initialization...');
-        console.log(`[DB] URL: ${TURSO_DB_URL}`);
-        console.log(`[DB] Token loaded: ${Boolean(TURSO_AUTH_TOKEN)}`);
+        console.log('[DB] Database URL configured:', Boolean(TURSO_DB_URL));
+        console.log('[DB] Authentication token loaded:', Boolean(TURSO_AUTH_TOKEN));
 
         for (
             let attempt = 1;
@@ -246,7 +224,7 @@ async function initDB() {
 
                 const client = await connectTurso();
 
-                console.log('[DB] Initialization successful.');
+                console.log('[DB] Database initialization successful.');
 
                 return client;
 
@@ -264,15 +242,16 @@ async function initDB() {
 
                 if (attempt < DB_MAX_RETRIES) {
 
-                    const delay = DB_RETRY_DELAYS[attempt - 1];
+                    const delay =
+                        DB_RETRY_DELAYS[attempt - 1] || 8000;
 
                     console.log(
                         `[DB] Retrying in ${delay / 1000} seconds...`
                     );
 
-                    await new Promise(resolve =>
-                        setTimeout(resolve, delay)
-                    );
+                    await new Promise(resolve => {
+                        setTimeout(resolve, delay);
+                    });
 
                 } else {
 
@@ -294,8 +273,7 @@ async function initDB() {
 
     } finally {
 
-        // Allow the next Vercel request to retry
-        // if this initialization attempt failed.
+        // Permit a later request to try again after failure
         if (!dbReady) {
             dbInitPromise = null;
         }
@@ -305,6 +283,7 @@ async function initDB() {
 
 // =====================================================
 // GET DATABASE CLIENT
+// ALL DATABASE ACCESS SHOULD USE THIS FUNCTION
 // =====================================================
 
 async function getDB() {
@@ -326,67 +305,54 @@ async function getDB() {
 
 
 // =====================================================
-// EXECUTE QUERY WITH CONNECTION RECOVERY
+// EXECUTE DATABASE QUERY
 // =====================================================
 
 async function executeDB(sql, params = []) {
 
-    let lastError = null;
+    const client = await getDB();
 
-    // First attempt + one recovery attempt
-    for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
 
-        try {
+        const result = await client.execute({
+            sql,
+            args: params
+        });
 
-            const client = await getDB();
+        return result;
 
-            const result = await client.execute({
-                sql,
-                args: params
-            });
+    } catch (error) {
 
-            return result;
+        logDBError('Database query failed', error);
 
-        } catch (error) {
-
-            lastError = error;
-
-            logDBError(
-                `Query attempt ${attempt} failed`,
-                error
-            );
-
-            // Only reconnect for actual connection failures
-            if (!isConnectionError(error)) {
-                throw error;
-            }
+        // Mark a broken connection unavailable.
+        // The next request/query can initialize a fresh client.
+        if (isConnectionError(error)) {
 
             dbReady = false;
             dbClient = null;
+
             dbError = error?.message || 'Connection lost';
 
-            if (attempt < 2) {
-
-                console.warn(
-                    '[DB] Connection lost. Reinitializing Turso...'
-                );
-
-                // Next getDB() call will initialize a new client
-            }
+            console.warn(
+                '[DB] Connection lost. A fresh connection will be initialized on the next database request.'
+            );
         }
-    }
 
-    throw lastError || new Error('Database query failed.');
+        // Do not automatically repeat a failed INSERT/UPDATE:
+        // the database may have executed it before the network failed.
+        throw error;
+    }
 }
 
 
 // =====================================================
 // DATABASE QUERY HELPERS
+// EXISTING FUNCTION NAMES PRESERVED
 // =====================================================
 
 // General query
 async function query(sql, params = []) {
-
     return executeDB(sql, params);
 }
 
@@ -424,7 +390,7 @@ function getDBStatus() {
 
 
 // =====================================================
-// LOGGING
+// DATABASE LOGGING
 // =====================================================
 
 function logDB(msg) {
@@ -435,7 +401,7 @@ function logDB(msg) {
         `[${new Date(timestamp).toISOString()}] ${msg}`
     );
 
-    // Do not block application execution for logging
+    // Keep application logging non-blocking
     if (dbReady && dbClient) {
 
         executeDB(
@@ -467,6 +433,7 @@ async function logUserEvent(
 ) {
 
     if (!dbReady || !dbClient) {
+
         console.warn(
             '[DB] Skipping user event log: database unavailable.'
         );
@@ -502,7 +469,10 @@ async function logUserEvent(
 // INITIALIZATION MESSAGE
 // =====================================================
 
-logDB('Database module loaded. Connection will initialize on first query.');
+console.log(
+    '[DB] Database module loaded. Connection will initialize on first query.'
+);
+
 
 // =====================================================
 // WEBSOCKET SERVER
