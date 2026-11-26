@@ -7,7 +7,7 @@ const os = require('os');
 
 // =====================================================
 // TURSO DATABASE SETUP - VERCEL OPTIMIZED
-// EXISTING DATABASE SCHEMA PRESERVED
+// UPDATED SCHEMA WITH FINGERPRINT
 // =====================================================
 
 const RAW_URL = process.env.TURSO_DATABASE_URL || '';
@@ -86,7 +86,7 @@ function isConnectionError(error) {
 
 // =====================================================
 // DATABASE SCHEMA
-// IMPORTANT: DO NOT CHANGE EXISTING TABLE STRUCTURE
+// UPDATED: INCLUDES FINGERPRINT COLUMN
 // =====================================================
 
 async function ensureSchema(client) {
@@ -94,10 +94,11 @@ async function ensureSchema(client) {
  throw new Error('Cannot create schema: Turso client unavailable.');
  }
 
- // USERS TABLE - EXISTING STRUCTURE PRESERVED
+ // USERS TABLE - UPDATED WITH FINGERPRINT
  await client.execute(`
  CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY,
+ fingerprint TEXT,
  os TEXT,
  arch TEXT,
  user TEXT,
@@ -105,26 +106,25 @@ async function ensureSchema(client) {
  last_seen INTEGER,
  status TEXT DEFAULT 'Offline',
  created_at INTEGER DEFAULT (strftime('%s', 'now')),
- serial_number TEXT,
- fingerprint TEXT
+ serial_number TEXT
  );
  `);
 
  // CRITICAL FIX: Ensure columns exist even if table was created earlier without them
  try {
-   await client.execute(`
-     ALTER TABLE users ADD COLUMN IF NOT EXISTS serial_number TEXT;
-   `);
+ await client.execute(`
+ ALTER TABLE users ADD COLUMN IF NOT EXISTS fingerprint TEXT;
+ `);
  } catch (e) {
-   // Column might already exist or be immutable in some configs, ignore error
+ // Column might already exist or be immutable in some configs, ignore error
  }
 
  try {
-   await client.execute(`
-     ALTER TABLE users ADD COLUMN IF NOT EXISTS fingerprint TEXT;
-   `);
+ await client.execute(`
+ ALTER TABLE users ADD COLUMN IF NOT EXISTS serial_number TEXT;
+ `);
  } catch (e) {
-   // Column might already exist or be immutable in some configs, ignore error
+ // Column might already exist or be immutable in some configs, ignore error
  }
 
  // LOGS TABLE - EXISTING STRUCTURE PRESERVED
@@ -551,19 +551,19 @@ wss.on('connection', (ws, req) => {
  await client.execute({
  sql: `
  INSERT INTO users (
- id, os, arch, user, ip, last_seen, status, serial_number, fingerprint
+ id, fingerprint, os, arch, user, ip, last_seen, status, serial_number
  )
- VALUES (?, ?, ?, ?, ?, ?, 'Online', ?, ?)
+ VALUES (?, ?, ?, ?, ?, ?, ?, 'Online', ?)
  `,
  args: [
  uniqueId,
+ data.fingerprint || uniqueId,
  data.os || null,
  data.arch || null,
  data.user || null,
  data.ip || remoteAddress,
  now,
- data.serialNumber || uniqueId,
- data.fingerprint || uniqueId
+ data.serialNumber || uniqueId
  ]
  });
 
@@ -879,6 +879,7 @@ module.exports = async (req, res) => {
 
 // =====================================================
 // ADMIN PANEL HTML
+// UPDATED: ADDED FINGERPRINT COLUMN TO TABLE
 // =====================================================
 
 const adminHTML = `
@@ -1164,7 +1165,7 @@ const adminHTML = `
 
  .table-header {
  display: grid;
- grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr;
+ grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr 1fr;
  padding: 16px 24px;
  background-color: rgba(0, 0, 0, 0.2);
  color: var(--text-muted);
@@ -1177,7 +1178,7 @@ const adminHTML = `
 
  .table-row {
  display: grid;
- grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr;
+ grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr 1fr;
  padding: 18px 24px;
  border-bottom: 1px solid var(--border-light);
  align-items: center;
@@ -1479,7 +1480,7 @@ const adminHTML = `
  <div class="table-header">
  <div></div>
  <div>Computer Name</div>
- <div>Serial Number</div>
+ <div>Fingerprint</div>
  <div>OS / User</div>
  <div>Last Seen</div>
  <div>Status</div>
@@ -1726,7 +1727,7 @@ const adminHTML = `
  <div class="name"><i class="fa-solid fa-desktop"></i> \${id}</div>
  <div class="company">\${data.info.user || 'Unknown User'} | \${data.info.os || 'Unknown OS'}</div>
  </div>
- <div>\${data.serialNumber || 'N/A'}</div>
+ <div>\${data.fingerprint || 'N/A'}</div>
  <div>\${data.info.os || 'N/A'} / \${data.info.user || 'N/A'}</div>
  <div>\${lastSeenStr}</div>
  <div class="status">
