@@ -4,7 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { createClient } = require('@libsql/client');
 const fs = require('fs');
 const os = require('os');
-    
+
 // =====================================================
 // TURSO DATABASE SETUP - VERCEL OPTIMIZED
 // UPDATED SCHEMA WITH FINGERPRINT
@@ -106,7 +106,8 @@ async function ensureSchema(client) {
  last_seen INTEGER,
  status TEXT DEFAULT 'Offline',
  created_at INTEGER DEFAULT (strftime('%s', 'now')),
- serial_number TEXT
+ serial_number TEXT,
+ device_name TEXT
  );
  `);
 
@@ -122,6 +123,14 @@ async function ensureSchema(client) {
  try {
  await client.execute(`
  ALTER TABLE users ADD COLUMN IF NOT EXISTS serial_number TEXT;
+ `);
+ } catch (e) {
+ // Column might already exist or be immutable in some configs, ignore error
+ }
+
+ try {
+ await client.execute(`
+ ALTER TABLE users ADD COLUMN IF NOT EXISTS device_name TEXT;
  `);
  } catch (e) {
  // Column might already exist or be immutable in some configs, ignore error
@@ -150,7 +159,7 @@ async function ensureSchema(client) {
  // Verify database responds
  await client.execute('SELECT 1 AS schema_check');
 
- console.log('[DB] Existing database schema verified with fingerprint/serial columns.');
+ console.log('[DB] Existing database schema verified with fingerprint/serial/device_name columns.');
 
  return true;
 }
@@ -495,7 +504,8 @@ wss.on('connection', (ws, req) => {
  last_seen: u.last_seen,
  status: u.status,
  serial_number: u.serial_number,
- fingerprint: u.fingerprint
+ fingerprint: u.fingerprint,
+ device_name: u.device_name
  }));
  }
 
@@ -508,7 +518,8 @@ wss.on('connection', (ws, req) => {
  last_seen: u.last_seen,
  status: u.status,
  serial_number: u.serial_number,
- fingerprint: u.fingerprint
+ fingerprint: u.fingerprint,
+ device_name: u.device_name
  }));
  
  // Send the full list to the admin
@@ -539,7 +550,8 @@ wss.on('connection', (ws, req) => {
  last_seen: now,
  status: 'Online',
  serial_number: data.serialNumber || uniqueId,
- fingerprint: data.fingerprint || uniqueId
+ fingerprint: data.fingerprint || uniqueId,
+ device_name: data.deviceName || uniqueId
  };
 
  if (dbClient && dbReady) {
@@ -551,9 +563,9 @@ wss.on('connection', (ws, req) => {
  await client.execute({
  sql: `
  INSERT INTO users (
- id, fingerprint, os, arch, user, ip, last_seen, status, serial_number
+ id, fingerprint, os, arch, user, ip, last_seen, status, serial_number, device_name
  )
- VALUES (?, ?, ?, ?, ?, ?, ?, 'Online', ?)
+ VALUES (?, ?, ?, ?, ?, ?, ?, 'Online', ?, ?)
  `,
  args: [
  uniqueId,
@@ -563,11 +575,12 @@ wss.on('connection', (ws, req) => {
  data.user || null,
  data.ip || remoteAddress,
  now,
- data.serialNumber || uniqueId
+ data.serialNumber || uniqueId,
+ data.deviceName || uniqueId
  ]
  });
 
- logDB(`[AGENT] NEW: ${uniqueId} (${data.os || 'unknown'})`);
+ logDB(`[AGENT] NEW: ${uniqueId} (${data.os || 'unknown'}) - Device: ${data.deviceName || 'N/A'}`);
 
  await logUserEvent(
  uniqueId,
@@ -585,7 +598,8 @@ wss.on('connection', (ws, req) => {
  user = COALESCE(?, user),
  ip = COALESCE(?, ip),
  serial_number = COALESCE(?, serial_number),
- fingerprint = COALESCE(?, fingerprint)
+ fingerprint = COALESCE(?, fingerprint),
+ device_name = COALESCE(?, device_name)
  WHERE id = ?
  `,
  args: [
@@ -596,11 +610,12 @@ wss.on('connection', (ws, req) => {
  data.ip || remoteAddress,
  data.serialNumber || uniqueId,
  data.fingerprint || uniqueId,
+ data.deviceName || uniqueId,
  uniqueId
  ]
  });
 
- logDB(`[AGENT] REJOIN: ${uniqueId} (${data.os || 'unknown'})`);
+ logDB(`[AGENT] REJOIN: ${uniqueId} (${data.os || 'unknown'}) - Device: ${data.deviceName || 'N/A'}`);
 
  await logUserEvent(
  uniqueId,
@@ -1562,7 +1577,8 @@ const adminHTML = `
  sessionActive: false,
  serialNumber: user.serial_number,
  ip: user.ip,
- fingerprint: user.fingerprint
+ fingerprint: user.fingerprint,
+ device_name: user.device_name
  };
  });
  renderUsers();
@@ -1576,7 +1592,8 @@ const adminHTML = `
  sessionActive: false,
  serialNumber: data.info.serialNumber || 'N/A',
  ip: data.info.ip || 'Unknown',
- fingerprint: data.info.fingerprint || 'N/A'
+ fingerprint: data.info.fingerprint || 'N/A',
+ device_name: data.info.device_name || 'N/A'
  };
  } else {
  users[data.id].status = 'Online';
@@ -1724,7 +1741,7 @@ const adminHTML = `
  row.innerHTML = \`
  <div class="custom-checkbox"></div>
  <div class="machine-info">
- <div class="name"><i class="fa-solid fa-desktop"></i> \${id}</div>
+ <div class="name"><i class="fa-solid fa-desktop"></i> \${data.device_name || id}</div>
  <div class="company">\${data.info.user || 'Unknown User'} | \${data.info.os || 'Unknown OS'}</div>
  </div>
  <div>\${data.fingerprint || 'N/A'}</div>
@@ -1763,7 +1780,7 @@ const adminHTML = `
 
  function openSession(targetId) {
  document.getElementById('sessionModal').classList.add('active');
- document.getElementById('modalMachineName').textContent = "Connecting to " + targetId;
+ document.getElementById('modalMachineName').textContent = "Connecting to " + (users[targetId]?.device_name || targetId);
  
  const session = getSession(targetId);
  const pc = session.pc;
