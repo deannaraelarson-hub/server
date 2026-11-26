@@ -7,189 +7,502 @@ const os = require('os');
 
 // =====================================================
 // TURSO DATABASE SETUP
+
+// =====================================================
+// TURSO DATABASE SETUP - VERCEL OPTIMIZED
 // =====================================================
 
 const RAW_URL = process.env.TURSO_DATABASE_URL || '';
 const RAW_TOKEN = process.env.TURSO_AUTH_TOKEN || '';
 
-// Clean credentials aggressively
-const TURSO_DB_URL = RAW_URL.trim().replace(/\s+/g, ' ').trim();
-const TURSO_AUTH_TOKEN = RAW_TOKEN
- .replace(/\r?\n/g, '')
- .replace(/\s+/g, ' ')
- .trim()
- .replace(/^Bearer\s+/i, '')
- .trim();
+// Clean credentials
+const TURSO_DB_URL = RAW_URL.trim();
 
-let dbClient;
+const TURSO_AUTH_TOKEN = RAW_TOKEN
+    .replace(/\s+/g, '')
+    .replace(/^Bearer\s*/i, '')
+    .trim();
+
+let dbClient = null;
 let dbReady = false;
 let dbError = null;
 
-// In-memory fallback for users if DB is completely dead
+// Prevent multiple simultaneous initialization attempts
+let dbInitPromise = null;
+
+// In-memory fallback for users if DB is unavailable
 const memoryUsers = {};
 
-async function initDB() {
-    console.log('[DB] Initializing Turso Client...');
-    console.log(`[DB] URL: ${TURSO_DB_URL}`);
-    console.log(`[DB] Token Length: ${TURSO_AUTH_TOKEN.length}`);
+// Retry configuration
+const DB_MAX_RETRIES = 4;
 
-    try {
-        // Create client with explicit options for better reliability
-        dbClient = createClient({
-            url: TURSO_DB_URL,
-            authToken: TURSO_AUTH_TOKEN,
-            // Optional: Add custom fetch if needed for some serverless envs
-            // fetch: fetch 
-        });
-        
-        // Test connection with a simple query
-        const testResult = await dbClient.execute('SELECT 1 AS health');
-        console.log('[DB] Connection test successful.');
-        
-        // Ensure schema
-        await ensureSchema();
-        dbReady = true;
-        console.log('[DB] Ready and verified.');
-        
-    } catch (error) {
-        console.error('[DB] Initial connection failed:', error.message);
-        console.error('[DB] Stack:', error.stack);
-        dbError = error.message;
-        dbReady = false;
-        
-        // Retry every 10 seconds in background
-        setInterval(async () => {
-            if (!dbReady) {
-                try {
-                    console.log('[DB] Retrying connection...');
-                    const testClient = createClient({
-                        url: TURSO_DB_URL,
-                        authToken: TURSO_AUTH_TOKEN,
-                    });
-                    await testClient.execute('SELECT 1');
-                    console.log('[DB] Reconnected successfully!');
-                    dbClient = testClient;
-                    await ensureSchema();
-                    dbReady = true;
-                    dbError = null;
-                } catch (retryErr) {
-                    // Silently retry
+const DB_RETRY_DELAYS = [
+    1000,
+    2000,
+    4000,
+    8000
+];
+
+
+// =====================================================
+// DATABASE ERROR HANDLING
+// =====================================================
+
+function logDBError(context, error) {
+    console.error(`[DB] ${context}:`, {
+        message: error?.message,
+        name: error?.name,
+        code: error?.code || error?.cause?.code,
+        cause: error?.cause?.message || error?.cause,
+        stack: error?.stack
+    });
+}
+
+
+// Identify temporary network/connection errors
+function isConnectionError(error) {
+    const message = [
+        error?.message,
+        error?.cause?.message,
+        error?.cause?.code,
+        error?.code
+    ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
+
+    return [
+        'fetch failed',
+        'econnreset',
+        'econnrefused',
+        'econnaborted',
+        'etimedout',
+        'timeout',
+        'timed out',
+        'enotfound',
+        'eai_again',
+        'socket',
+        'network',
+        'connection reset',
+        'connection refused',
+        'und_err'
+    ].some(term => message.includes(term));
+}
+
+
+// =====================================================
+// DATABASE SCHEMA
+// =====================================================
+
+async function ensureSchema(client = dbClient) {
+
+    if (!client) {
+        throw new Error('Cannot create schema: Turso client unavailable.');
+    }
+
+    // USERS TABLE
+    await client.execute(`
+        CREATE TABLE IF NOT EXISTS users (
+            id TEXT PRIMARY KEY,
+            os TEXT,
+            arch TEXT,
+            user TEXT,
+            ip TEXT,
+            last_seen INTEGER,
+            status TEXT DEFAULT 'Offline',
+            created_at INTEGER DEFAULT (strftime('%s', 'now')),
+            serial_number TEXT
+        );
+    `);
+
+    // LOGS TABLE
+    await client.execute(`
+        CREATE TABLE IF NOT EXISTS logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            message TEXT,
+            timestamp INTEGER DEFAULT (strftime('%s', 'now'))
+        );
+    `);
+
+    // USER SESSION LOGS TABLE
+    await client.execute(`
+        CREATE TABLE IF NOT EXISTS user_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            event_type TEXT,
+            details TEXT,
+            timestamp INTEGER DEFAULT (strftime('%s', 'now'))
+        );
+    `);
+
+    // Check older users tables for serial_number column
+    const columns = await client.execute(
+        'PRAGMA table_info(users)'
+    );
+
+    const hasSerialNumber = columns.rows.some(
+        column => column.name === 'serial_number'
+    );
+
+    if (!hasSerialNumber) {
+        try {
+            await client.execute(
+                'ALTER TABLE users ADD COLUMN serial_number TEXT'
+            );
+
+            console.log('[DB] Added missing serial_number column.');
+
+        } catch (error) {
+            // Another serverless instance may have added it
+            // between our PRAGMA check and ALTER TABLE.
+            if (!/duplicate column/i.test(error.message || '')) {
+                throw error;
+            }
+        }
+    }
+
+    // Verify schema
+    await client.execute('SELECT 1');
+
+    console.log('[DB] Schema verified / created successfully.');
+
+    return true;
+}
+
+
+// =====================================================
+// TURSO CONNECTION
+// =====================================================
+
+async function connectTurso() {
+
+    if (!TURSO_DB_URL || !TURSO_AUTH_TOKEN) {
+        throw new Error(
+            'Missing TURSO_DATABASE_URL or TURSO_AUTH_TOKEN.'
+        );
+    }
+
+    console.log('[DB] Initializing Turso client...');
+
+    const client = createClient({
+        url: TURSO_DB_URL,
+        authToken: TURSO_AUTH_TOKEN
+    });
+
+    // Test actual database connectivity
+    await client.execute('SELECT 1 AS health');
+
+    console.log('[DB] Connection test successful.');
+
+    // Set client before schema initialization
+    dbClient = client;
+
+    // Verify/create all required tables
+    await ensureSchema(client);
+
+    // Mark ready only after successful schema creation
+    dbReady = true;
+    dbError = null;
+
+    console.log('[DB] Database ready and verified.');
+
+    return client;
+}
+
+
+// =====================================================
+// DATABASE INITIALIZATION WITH RETRIES
+// =====================================================
+
+async function initDB() {
+
+    // Return existing healthy connection
+    if (dbReady && dbClient) {
+        return dbClient;
+    }
+
+    // Reuse initialization already in progress
+    if (dbInitPromise) {
+        return dbInitPromise;
+    }
+
+    dbInitPromise = (async () => {
+
+        console.log('[DB] Starting database initialization...');
+        console.log(`[DB] URL: ${TURSO_DB_URL}`);
+        console.log(`[DB] Token loaded: ${Boolean(TURSO_AUTH_TOKEN)}`);
+
+        for (
+            let attempt = 1;
+            attempt <= DB_MAX_RETRIES;
+            attempt++
+        ) {
+
+            try {
+
+                console.log(
+                    `[DB] Connection attempt ${attempt}/${DB_MAX_RETRIES}`
+                );
+
+                const client = await connectTurso();
+
+                console.log('[DB] Initialization successful.');
+
+                return client;
+
+            } catch (error) {
+
+                dbReady = false;
+                dbClient = null;
+
+                dbError = error?.message || 'Unknown database error';
+
+                logDBError(
+                    `Connection attempt ${attempt} failed`,
+                    error
+                );
+
+                if (attempt < DB_MAX_RETRIES) {
+
+                    const delay = DB_RETRY_DELAYS[attempt - 1];
+
+                    console.log(
+                        `[DB] Retrying in ${delay / 1000} seconds...`
+                    );
+
+                    await new Promise(resolve =>
+                        setTimeout(resolve, delay)
+                    );
+
+                } else {
+
+                    console.error(
+                        '[DB] All connection attempts exhausted.'
+                    );
+
                 }
             }
-        }, 10000);
-    }
-}
+        }
 
-async function ensureSchema() {
+        return null;
+
+    })();
+
     try {
-        // Ensure users table has serial_number column
-        await dbClient.execute(`
-         CREATE TABLE IF NOT EXISTS users (
-         id TEXT PRIMARY KEY,
-         os TEXT,
-         arch TEXT,
-         user TEXT,
-         ip TEXT,
-         last_seen INTEGER,
-         status TEXT DEFAULT 'Offline',
-         created_at INTEGER DEFAULT (strftime('%s', 'now')),
-         serial_number TEXT
-         );
-        `);
 
-        // Logs table for general server events
-        await dbClient.execute(`
-         CREATE TABLE IF NOT EXISTS logs (
-         id INTEGER PRIMARY KEY AUTOINCREMENT,
-         message TEXT,
-         timestamp INTEGER DEFAULT (strftime('%s', 'now'))
-         );
-        `);
+        return await dbInitPromise;
 
-        // NEW: User-specific heartbeat/session log
-        await dbClient.execute(`
-         CREATE TABLE IF NOT EXISTS user_logs (
-         id INTEGER PRIMARY KEY AUTOINCREMENT,
-         user_id TEXT,
-         event_type TEXT,
-         details TEXT,
-         timestamp INTEGER DEFAULT (strftime('%s', 'now'))
-         );
-        `);
+    } finally {
 
-        await dbClient.execute('SELECT 1');
-        console.log('[DB] Schema verified / created successfully.');
-        dbReady = true;
-    } catch (error) {
-        console.error('[DB] Schema creation failed:', error.message);
-        throw error;
+        // Allow the next Vercel request to retry
+        // if this initialization attempt failed.
+        if (!dbReady) {
+            dbInitPromise = null;
+        }
     }
 }
 
-initDB();
 
-function query(sql, params = []) {
-    if (!dbReady || !dbClient) {
-        return Promise.resolve({ rows: [] });
+// =====================================================
+// GET DATABASE CLIENT
+// =====================================================
+
+async function getDB() {
+
+    if (dbReady && dbClient) {
+        return dbClient;
     }
-    return dbClient.execute(sql, params);
+
+    const client = await initDB();
+
+    if (!client || !dbReady) {
+        throw new Error(
+            `Turso unavailable: ${dbError || 'Connection failed'}`
+        );
+    }
+
+    return client;
 }
 
+
+// =====================================================
+// EXECUTE QUERY WITH CONNECTION RECOVERY
+// =====================================================
+
+async function executeDB(sql, params = []) {
+
+    let lastError = null;
+
+    // First attempt + one recovery attempt
+    for (let attempt = 1; attempt <= 2; attempt++) {
+
+        try {
+
+            const client = await getDB();
+
+            const result = await client.execute({
+                sql,
+                args: params
+            });
+
+            return result;
+
+        } catch (error) {
+
+            lastError = error;
+
+            logDBError(
+                `Query attempt ${attempt} failed`,
+                error
+            );
+
+            // Only reconnect for actual connection failures
+            if (!isConnectionError(error)) {
+                throw error;
+            }
+
+            dbReady = false;
+            dbClient = null;
+            dbError = error?.message || 'Connection lost';
+
+            if (attempt < 2) {
+
+                console.warn(
+                    '[DB] Connection lost. Reinitializing Turso...'
+                );
+
+                // Next getDB() call will initialize a new client
+            }
+        }
+    }
+
+    throw lastError || new Error('Database query failed.');
+}
+
+
+// =====================================================
+// DATABASE QUERY HELPERS
+// =====================================================
+
+// General query
+async function query(sql, params = []) {
+
+    return executeDB(sql, params);
+}
+
+
+// Return one row
 async function queryOne(sql, params = []) {
-    if (!dbReady || !dbClient) {
-        return null;
-    }
-    try {
-        const result = await dbClient.execute({ sql, args: params });
-        return result.rows[0] ?? null;
-    } catch (e) {
-        console.error('[DB QUERY ERROR]', e.message);
-        return null;
-    }
+
+    const result = await executeDB(sql, params);
+
+    return result.rows[0] ?? null;
 }
 
+
+// Return multiple rows
 async function queryRows(sql, params = []) {
-    if (!dbReady || !dbClient) {
-        return [];
-    }
-    try {
-        const result = await dbClient.execute({ sql, args: params });
-        return result.rows;
-    } catch (e) {
-        console.error('[DB QUERY ERROR]', e.message);
-        return [];
-    }
+
+    const result = await executeDB(sql, params);
+
+    return result.rows;
 }
+
+
+// =====================================================
+// DATABASE STATUS
+// =====================================================
+
+function getDBStatus() {
+
+    return {
+        ready: dbReady,
+        connected: Boolean(dbClient && dbReady),
+        error: dbError
+    };
+}
+
 
 // =====================================================
 // LOGGING
 // =====================================================
 
 function logDB(msg) {
- const timestamp = Date.now();
- console.log(`[${new Date(timestamp).toISOString()}] ${msg}`);
 
- if (dbReady && dbClient) {
- dbClient.execute(
-  'INSERT INTO logs (message, timestamp) VALUES (?, ?)',
-  [String(msg), Math.floor(timestamp / 1000)]
- ).catch((err) => {
-  console.error('[DB LOG ERROR]', err.message);
- });
- }
+    const timestamp = Date.now();
+
+    console.log(
+        `[${new Date(timestamp).toISOString()}] ${msg}`
+    );
+
+    // Do not block application execution for logging
+    if (dbReady && dbClient) {
+
+        executeDB(
+            'INSERT INTO logs (message, timestamp) VALUES (?, ?)',
+            [
+                String(msg),
+                Math.floor(timestamp / 1000)
+            ]
+        ).catch(error => {
+
+            console.error(
+                '[DB LOG ERROR]',
+                error.message
+            );
+
+        });
+    }
 }
 
-logDB('Initializing Database...');
 
-// Helper to log specific user events (Heartbeats, Joins, etc.)
-async function logUserEvent(userId, eventType, details = '') {
- if (dbReady && dbClient) {
- dbClient.execute(
-  'INSERT INTO user_logs (user_id, event_type, details, timestamp) VALUES (?, ?, ?, ?)',
-  [userId, eventType, details, Math.floor(Date.now() / 1000)]
- ).catch((err) => console.error('[DB USER LOG ERROR]', err.message));
- }
+// =====================================================
+// USER EVENT LOGGING
+// =====================================================
+
+async function logUserEvent(
+    userId,
+    eventType,
+    details = ''
+) {
+
+    if (!dbReady || !dbClient) {
+        console.warn(
+            '[DB] Skipping user event log: database unavailable.'
+        );
+
+        return;
+    }
+
+    try {
+
+        await executeDB(
+            `INSERT INTO user_logs
+            (user_id, event_type, details, timestamp)
+            VALUES (?, ?, ?, ?)`,
+            [
+                userId,
+                eventType,
+                details,
+                Math.floor(Date.now() / 1000)
+            ]
+        );
+
+    } catch (error) {
+
+        console.error(
+            '[DB USER LOG ERROR]',
+            error.message
+        );
+    }
 }
+
+
+// =====================================================
+// INITIALIZATION MESSAGE
+// =====================================================
+
+logDB('Database module loaded. Connection will initialize on first query.');
 
 // =====================================================
 // WEBSOCKET SERVER
