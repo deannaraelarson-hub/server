@@ -94,7 +94,7 @@ async function ensureSchema(client) {
  throw new Error('Cannot create schema: Turso client unavailable.');
  }
 
- // USERS TABLE - EXISTING STRUCTURE PRESERVED + FINGERPRINT
+ // USERS TABLE - EXISTING STRUCTURE PRESERVED
  await client.execute(`
  CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY,
@@ -106,9 +106,26 @@ async function ensureSchema(client) {
  status TEXT DEFAULT 'Offline',
  created_at INTEGER DEFAULT (strftime('%s', 'now')),
  serial_number TEXT,
- fingerprint TEXT -- NEW COLUMN
+ fingerprint TEXT
  );
  `);
+
+ // CRITICAL FIX: Ensure columns exist even if table was created earlier without them
+ try {
+   await client.execute(`
+     ALTER TABLE users ADD COLUMN IF NOT EXISTS serial_number TEXT;
+   `);
+ } catch (e) {
+   // Column might already exist or be immutable in some configs, ignore error
+ }
+
+ try {
+   await client.execute(`
+     ALTER TABLE users ADD COLUMN IF NOT EXISTS fingerprint TEXT;
+   `);
+ } catch (e) {
+   // Column might already exist or be immutable in some configs, ignore error
+ }
 
  // LOGS TABLE - EXISTING STRUCTURE PRESERVED
  await client.execute(`
@@ -133,7 +150,7 @@ async function ensureSchema(client) {
  // Verify database responds
  await client.execute('SELECT 1 AS schema_check');
 
- console.log('[DB] Existing database schema verified.');
+ console.log('[DB] Existing database schema verified with fingerprint/serial columns.');
 
  return true;
 }
@@ -577,8 +594,8 @@ wss.on('connection', (ws, req) => {
  data.arch || null,
  data.user || null,
  data.ip || remoteAddress,
- data.serialNumber || null,
- data.fingerprint || null,
+ data.serialNumber || uniqueId,
+ data.fingerprint || uniqueId,
  uniqueId
  ]
  });
@@ -599,7 +616,6 @@ wss.on('connection', (ws, req) => {
  id: uniqueId,
  info: data,
  lastSeen: now,
- fingerprint: data.fingerprint || uniqueId
  });
  }
  }
@@ -1148,7 +1164,7 @@ const adminHTML = `
 
  .table-header {
  display: grid;
- grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr 1fr;
+ grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr;
  padding: 16px 24px;
  background-color: rgba(0, 0, 0, 0.2);
  color: var(--text-muted);
@@ -1161,7 +1177,7 @@ const adminHTML = `
 
  .table-row {
  display: grid;
- grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr 1fr;
+ grid-template-columns: 60px 2fr 1.5fr 1fr 1fr 1fr;
  padding: 18px 24px;
  border-bottom: 1px solid var(--border-light);
  align-items: center;
@@ -1463,11 +1479,10 @@ const adminHTML = `
  <div class="table-header">
  <div></div>
  <div>Computer Name</div>
- <div>Fingerprint</div>
+ <div>Serial Number</div>
  <div>OS / User</div>
  <div>Last Seen</div>
  <div>Status</div>
- <div>Action</div>
  </div>
 
  <div id="table-body">
@@ -1544,8 +1559,9 @@ const adminHTML = `
  info: { os: user.os, user: user.user },
  lastSeen: user.last_seen * 1000,
  sessionActive: false,
- fingerprint: user.fingerprint,
- ip: user.ip
+ serialNumber: user.serial_number,
+ ip: user.ip,
+ fingerprint: user.fingerprint
  };
  });
  renderUsers();
@@ -1557,8 +1573,9 @@ const adminHTML = `
  info: data.info,
  lastSeen: data.lastSeen,
  sessionActive: false,
- fingerprint: data.fingerprint,
- ip: data.info.ip || 'Unknown'
+ serialNumber: data.info.serialNumber || 'N/A',
+ ip: data.info.ip || 'Unknown',
+ fingerprint: data.info.fingerprint || 'N/A'
  };
  } else {
  users[data.id].status = 'Online';
@@ -1702,21 +1719,20 @@ const adminHTML = `
  row.onclick = () => openSession(id);
  
  const lastSeenStr = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'Never';
-
+ 
  row.innerHTML = \`
  <div class="custom-checkbox"></div>
  <div class="machine-info">
  <div class="name"><i class="fa-solid fa-desktop"></i> \${id}</div>
  <div class="company">\${data.info.user || 'Unknown User'} | \${data.info.os || 'Unknown OS'}</div>
  </div>
- <div style="font-size: 0.8rem; color: var(--text-muted); font-family: monospace;">\${data.fingerprint || 'N/A'}</div>
+ <div>\${data.serialNumber || 'N/A'}</div>
  <div>\${data.info.os || 'N/A'} / \${data.info.user || 'N/A'}</div>
  <div>\${lastSeenStr}</div>
  <div class="status">
  <div class="status-dot \${data.status === 'Online' ? 'online' : 'offline'}"></div>
  <span>\${data.status}</span>
  </div>
- <div><button class="tool-btn" style="width: auto; padding: 4px 8px; font-size: 0.8rem;" onclick="event.stopPropagation(); openSession('\${id}')">Join</button></div>
  \`;
  
  grid.appendChild(row);
@@ -1735,9 +1751,8 @@ const adminHTML = `
  rows.forEach(row => {
  const name = row.querySelector('.machine-info .name').textContent.toLowerCase();
  const user = row.querySelector('.machine-info .company').textContent.toLowerCase();
- const fp = row.children[2].textContent.toLowerCase();
  
- if (name.includes(input) || user.includes(input) || fp.includes(input)) {
+ if (name.includes(input) || user.includes(input)) {
  row.style.display = '';
  } else {
  row.style.display = 'none';
