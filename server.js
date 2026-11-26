@@ -738,6 +738,7 @@ if (!existingUser) {
    return;
   }
 
+
   // WEBRTC SIGNALING
   if (['offer', 'answer', 'candidate'].includes(data.type)) {
    if (ws.isAdmin && data.targetId) {
@@ -787,38 +788,40 @@ if (!existingUser) {
 
   if (!ws.isAdmin && ws.uniqueId) {
    const uniqueId = ws.uniqueId;
+
    if (!isAgentConnected(uniqueId, ws)) {
     // Update memory fallback
     if (memoryUsers[uniqueId]) {
-        memoryUsers[uniqueId].status = 'Offline';
-        memoryUsers[uniqueId].last_seen = Date.now();
+     memoryUsers[uniqueId].status = 'Offline';
+     memoryUsers[uniqueId].last_seen = Date.now();
     }
 
-      try {
-    const client = await getDB();
+    // Update Turso database
+    try {
+     const client = await getDB();
 
-    await client.execute({
-     sql: `
-      UPDATE users
-      SET status = 'Offline', last_seen = ?
-      WHERE id = ?
-     `,
-     args: [Date.now(), uniqueId]
-    });
+     await client.execute({
+      sql: `
+       UPDATE users
+       SET status = 'Offline', last_seen = ?
+       WHERE id = ?
+      `,
+      args: [Date.now(), uniqueId]
+     });
 
-    logDB(`[AGENT] Offline: ${uniqueId}`);
+     logDB(`[AGENT] Offline: ${uniqueId}`);
 
-    await logUserEvent(
-     uniqueId,
-     'OFFLINE',
-     `Disconnected at ${new Date().toISOString()}`
-    );
+     await logUserEvent(
+      uniqueId,
+      'OFFLINE',
+      `Disconnected at ${new Date().toISOString()}`
+     );
 
-   } catch (error) {
-    logDB(`[DB ERR] Disconnect update: ${error.message}`);
+    } catch (error) {
+     logDB(`[DB ERR] Disconnect update: ${error.message}`);
+    }
    }
   }
- }
 
   broadcastToAdmins(ws, { type: 'refresh_users' });
  });
@@ -827,6 +830,7 @@ if (!existingUser) {
   logDB(`[WS ERR] ${ws.id}: ${error.message}`);
  });
 });
+
 
 // =====================================================
 // WEBSOCKET HEARTBEAT
