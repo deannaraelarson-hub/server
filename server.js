@@ -880,6 +880,7 @@ module.exports = async (req, res) => {
 // =====================================================
 // ADMIN PANEL HTML
 // UPDATED: ADDED FINGERPRINT COLUMN TO TABLE
+// ESCAPED PROPERLY TO AVOID SYNTAX ERRORS
 // =====================================================
 
 const adminHTML = `
@@ -1703,7 +1704,7 @@ const adminHTML = `
  }));
 
  document.getElementById('sessionModal').classList.add('active');
- document.getElementById('modalMachineName').textContent = `Connecting to ${targetId}...`;
+ document.getElementById('modalMachineName').textContent = "Connecting to " + targetId + "...";
  }
 
  function closeSession(event, force = false) {
@@ -1780,7 +1781,7 @@ const adminHTML = `
  }));
 
  document.getElementById('sessionModal').classList.add('active');
- document.getElementById('modalMachineName').textContent = `Connecting to ${targetId}...`;
+ document.getElementById('modalMachineName').textContent = "Connecting to " + targetId + "...";
  }
 
  function filterTable() {
