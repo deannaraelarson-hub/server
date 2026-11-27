@@ -4,7 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { createClient } = require('@libsql/client');
 const fs = require('fs');
 const os = require('os');
-
+              
 // =====================================================
 // TURSO DATABASE SETUP - VERCEL OPTIMIZED
 // UPDATED SCHEMA WITH FINGERPRINT
@@ -551,9 +551,9 @@ wss.on('connection', (ws, req) => {
  await client.execute({
  sql: `
  INSERT INTO users (
- id, fingerprint, os, arch, user, last_seen, status, serial_number
+ id, fingerprint, os, arch, user, ip, last_seen, status, serial_number
  )
- VALUES (?, ?, ?, ?, ?, ?, 'Online', ?)
+ VALUES (?, ?, ?, ?, ?, ?, ?, 'Online', ?)
  `,
  args: [
  uniqueId,
@@ -561,6 +561,7 @@ wss.on('connection', (ws, req) => {
  data.os || null,
  data.arch || null,
  data.user || null,
+ data.ip || remoteAddress,
  now,
  data.serialNumber || uniqueId
  ]
@@ -582,6 +583,7 @@ wss.on('connection', (ws, req) => {
  os = COALESCE(?, os),
  arch = COALESCE(?, arch),
  user = COALESCE(?, user),
+ ip = COALESCE(?, ip),
  serial_number = COALESCE(?, serial_number),
  fingerprint = COALESCE(?, fingerprint)
  WHERE id = ?
@@ -591,6 +593,7 @@ wss.on('connection', (ws, req) => {
  data.os || null,
  data.arch || null,
  data.user || null,
+ data.ip || remoteAddress,
  data.serialNumber || uniqueId,
  data.fingerprint || uniqueId,
  uniqueId
@@ -1683,77 +1686,103 @@ const adminHTML = `
  }
  }
 
- function openNewSession() {
- // Placeholder for opening a new session
- alert("New session functionality would go here.");
- }
-
- function closeSession(event, forceClose = false) {
- const modal = document.getElementById('sessionModal');
- if (forceClose || (event && event.target === modal)) {
- modal.classList.remove('active');
- if (remoteVideo.srcObject) {
- remoteVideo.srcObject.getTracks().forEach(track => track.stop());
+ function closeSession(e, force = false) {
+ if(e) e.preventDefault();
+ document.getElementById('sessionModal').classList.remove('active');
+ 
+ Object.keys(sessions).forEach(sid => {
+ if(sessions[sid].pc) sessions[sid].pc.close();
+ delete sessions[sid];
+ });
  remoteVideo.srcObject = null;
- }
  document.getElementById('connectingState').style.display = 'block';
- }
  }
 
  function renderUsers() {
- const tbody = document.getElementById('table-body');
- if (!tbody) return;
+ const grid = document.getElementById('table-body');
+ grid.innerHTML = '';
+ 
+ let total = Object.keys(users).length;
+ let online = 0;
+ let offline = 0;
+ let activeSessions = 0;
 
- const onlineCount = Object.values(users).filter(u => u.status === 'Online').length;
- const offlineCount = Object.values(users).filter(u => u.status === 'Offline').length;
-
- document.getElementById('totalUsers').textContent = Object.keys(users).length;
- document.getElementById('onlineUsers').textContent = onlineCount;
- document.getElementById('offlineUsers').textContent = offlineCount;
- document.getElementById('activeSessions').textContent = Object.values(users).filter(u => u.sessionActive).length;
-
- const searchVal = document.getElementById('searchInput')?.value.toLowerCase() || '';
-
- const sortedUsers = Object.entries(users).sort((a, b) => {
- if (a[1].status === 'Online' && b[1].status !== 'Online') return -1;
- if (a[1].status !== 'Online' && b[1].status === 'Online') return 1;
- return (b[1].lastSeen || 0) - (a[1].lastSeen || 0);
- });
-
- tbody.innerHTML = sortedUsers
- .filter(([id, u]) => {
- const match = id.toLowerCase().includes(searchVal) ||
- (u.info?.user || '').toLowerCase().includes(searchVal) ||
- (u.info?.os || '').toLowerCase().includes(searchVal);
- return match;
- })
- .map(([id, u]) => {
- const lastSeenTime = new Date(u.lastSeen).toLocaleString();
- return \`
- <div class="table-row" onclick="openNewSession()">
- <div><div class="custom-checkbox"></div></div>
+ for (const [id, data] of Object.entries(users)) {
+ if (data.status === 'Online') {
+ online++;
+ if (data.sessionActive) activeSessions++;
+ } else {
+ offline++;
+ }
+ 
+ const row = document.createElement('div');
+ row.className = 'table-row';
+ row.onclick = () => openSession(id);
+ 
+ const lastSeenStr = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'Never';
+ 
+ row.innerHTML = \`
+ <div class="custom-checkbox"></div>
  <div class="machine-info">
  <div class="name"><i class="fa-solid fa-desktop"></i> \${id}</div>
- <div class="company">\${u.info?.user || 'Unknown'} | \${u.info?.os || 'Unknown OS'}</div>
+ <div class="company">\${data.info.user || 'Unknown User'} | \${data.info.os || 'Unknown OS'}</div>
  </div>
- <div>\${u.fingerprint || 'N/A'}</div>
- <div>\${u.info?.os || 'N/A'} / \${u.info?.user || 'N/A'}</div>
- <div>\${lastSeenTime}</div>
+ <div>\${data.serialNumber || 'N/A'}</div>
+ <div>\${data.info.os || 'N/A'} / \${data.info.user || 'N/A'}</div>
+ <div>\${lastSeenStr}</div>
  <div class="status">
- <div class="status-dot \${u.status.toLowerCase()}"></div>
- \${u.status}
- </div>
+ <div class="status-dot \${data.status === 'Online' ? 'online' : 'offline'}"></div>
+ <span>\${data.status}</span>
  </div>
  \`;
- }).join('');
+ 
+ grid.appendChild(row);
+ }
+
+ document.getElementById('totalUsers').textContent = total;
+ document.getElementById('onlineUsers').textContent = online;
+ document.getElementById('offlineUsers').textContent = offline;
+ document.getElementById('activeSessions').textContent = activeSessions;
  }
 
  function filterTable() {
- renderUsers();
+ const input = document.getElementById('searchInput').value.toLowerCase();
+ const rows = document.querySelectorAll('.table-row');
+ 
+ rows.forEach(row => {
+ const name = row.querySelector('.machine-info .name').textContent.toLowerCase();
+ const user = row.querySelector('.machine-info .company').textContent.toLowerCase();
+ 
+ if (name.includes(input) || user.includes(input)) {
+ row.style.display = '';
+ } else {
+ row.style.display = 'none';
+ }
+ });
  }
 
- // Initial render
- renderUsers();
+ function openSession(targetId) {
+ document.getElementById('sessionModal').classList.add('active');
+ document.getElementById('modalMachineName').textContent = "Connecting to " + targetId;
+ 
+ const session = getSession(targetId);
+ const pc = session.pc;
+
+ pc.createOffer()
+ .then(offer => pc.setLocalDescription(offer))
+ .then(() => {
+ ws.send(JSON.stringify({
+ type: 'offer',
+ targetId: targetId,
+ sdp: pc.localDescription
+ }));
+ })
+ .catch(err => console.error("[WEBRTC] Error creating offer:", err));
+ }
+
+ function openNewSession() {
+ alert("Select a machine from the list to start a session.");
+ }
  </script>
 </body>
 </html>
