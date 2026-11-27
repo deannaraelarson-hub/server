@@ -4,7 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { createClient } = require('@libsql/client');
 const fs = require('fs');
 const os = require('os');
-     
+           
 // =====================================================
 // TURSO DATABASE SETUP - VERCEL OPTIMIZED
 // UPDATED SCHEMA WITH FINGERPRINT
