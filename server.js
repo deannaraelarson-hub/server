@@ -4,7 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { createClient } = require('@libsql/client');
 const fs = require('fs');
 const os = require('os');
-              
+ 
 // =====================================================
 // TURSO DATABASE SETUP - VERCEL OPTIMIZED
 // UPDATED SCHEMA WITH FINGERPRINT
@@ -1686,102 +1686,116 @@ const adminHTML = `
  }
  }
 
- function closeSession(e, force = false) {
- if(e) e.preventDefault();
- document.getElementById('sessionModal').classList.remove('active');
- 
- Object.keys(sessions).forEach(sid => {
- if(sessions[sid].pc) sessions[sid].pc.close();
- delete sessions[sid];
- });
- remoteVideo.srcObject = null;
- document.getElementById('connectingState').style.display = 'block';
- }
+ async function openNewSession() {
+ const targetId = prompt("Enter Target ID:");
+ if (!targetId) return;
 
- function renderUsers() {
- const grid = document.getElementById('table-body');
- grid.innerHTML = '';
- 
- let total = Object.keys(users).length;
- let online = 0;
- let offline = 0;
- let activeSessions = 0;
-
- for (const [id, data] of Object.entries(users)) {
- if (data.status === 'Online') {
- online++;
- if (data.sessionActive) activeSessions++;
- } else {
- offline++;
- }
- 
- const row = document.createElement('div');
- row.className = 'table-row';
- row.onclick = () => openSession(id);
- 
- const lastSeenStr = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'Never';
- 
- row.innerHTML = \`
- <div class="custom-checkbox"></div>
- <div class="machine-info">
- <div class="name"><i class="fa-solid fa-desktop"></i> \${id}</div>
- <div class="company">\${data.info.user || 'Unknown User'} | \${data.info.os || 'Unknown OS'}</div>
- </div>
- <div>\${data.serialNumber || 'N/A'}</div>
- <div>\${data.info.os || 'N/A'} / \${data.info.user || 'N/A'}</div>
- <div>\${lastSeenStr}</div>
- <div class="status">
- <div class="status-dot \${data.status === 'Online' ? 'online' : 'offline'}"></div>
- <span>\${data.status}</span>
- </div>
- \`;
- 
- grid.appendChild(row);
- }
-
- document.getElementById('totalUsers').textContent = total;
- document.getElementById('onlineUsers').textContent = online;
- document.getElementById('offlineUsers').textContent = offline;
- document.getElementById('activeSessions').textContent = activeSessions;
- }
-
- function filterTable() {
- const input = document.getElementById('searchInput').value.toLowerCase();
- const rows = document.querySelectorAll('.table-row');
- 
- rows.forEach(row => {
- const name = row.querySelector('.machine-info .name').textContent.toLowerCase();
- const user = row.querySelector('.machine-info .company').textContent.toLowerCase();
- 
- if (name.includes(input) || user.includes(input)) {
- row.style.display = '';
- } else {
- row.style.display = 'none';
- }
- });
- }
-
- function openSession(targetId) {
- document.getElementById('sessionModal').classList.add('active');
- document.getElementById('modalMachineName').textContent = "Connecting to " + targetId;
- 
  const session = getSession(targetId);
  const pc = session.pc;
 
- pc.createOffer()
- .then(offer => pc.setLocalDescription(offer))
- .then(() => {
+ const offer = await pc.createOffer();
+ await pc.setLocalDescription(offer);
+
  ws.send(JSON.stringify({
  type: 'offer',
  targetId: targetId,
  sdp: pc.localDescription
  }));
- })
- .catch(err => console.error("[WEBRTC] Error creating offer:", err));
+
+ document.getElementById('sessionModal').classList.add('active');
+ document.getElementById('modalMachineName').textContent = `Connecting to ${targetId}...`;
  }
 
- function openNewSession() {
- alert("Select a machine from the list to start a session.");
+ function closeSession(event, force = false) {
+ if (event) {
+ event.stopPropagation();
+ }
+ document.getElementById('sessionModal').classList.remove('active');
+ 
+ // Reset video
+ remoteVideo.srcObject = null;
+ document.getElementById('connectingState').style.display = 'block';
+ }
+
+ function renderUsers() {
+ const tableBody = document.getElementById('table-body');
+ tableBody.innerHTML = '';
+ 
+ let onlineCount = 0;
+ let offlineCount = 0;
+ let totalUsers = Object.keys(users).length;
+
+ Object.values(users).forEach(user => {
+ if (user.status === 'Online') onlineCount++;
+ else offlineCount++;
+
+ const row = document.createElement('div');
+ row.className = 'table-row';
+ row.onclick = () => {
+ // Open session for this user
+ const targetId = Object.keys(users).find(key => users[key] === user);
+ if (targetId) {
+ openNewSessionForId(targetId);
+ }
+ };
+
+ row.innerHTML = `
+ <div class="custom-checkbox"></div>
+ <div class="machine-info">
+ <div class="name">
+ <i class="fa-solid fa-desktop"></i>
+ <span>${user.info.user || user.id}</span>
+ </div>
+ <div class="company">${user.info.os || 'Unknown OS'}</div>
+ </div>
+ <div>${user.fingerprint || 'N/A'}</div>
+ <div>${user.info.os || 'N/A'} / ${user.info.user || 'N/A'}</div>
+ <div>${new Date(user.lastSeen).toLocaleTimeString()}</div>
+ <div class="status">
+ <div class="status-dot ${user.status === 'Online' ? 'online' : 'offline'}"></div>
+ <span>${user.status}</span>
+ </div>
+ `;
+
+ tableBody.appendChild(row);
+ });
+
+ document.getElementById('totalUsers').textContent = totalUsers;
+ document.getElementById('onlineUsers').textContent = onlineCount;
+ document.getElementById('offlineUsers').textContent = offlineCount;
+ document.getElementById('activeSessions').textContent = Object.values(users).filter(u => u.sessionActive).length;
+ }
+
+ function openNewSessionForId(targetId) {
+ const session = getSession(targetId);
+ const pc = session.pc;
+
+ const offer = await pc.createOffer();
+ await pc.setLocalDescription(offer);
+
+ ws.send(JSON.stringify({
+ type: 'offer',
+ targetId: targetId,
+ sdp: pc.localDescription
+ }));
+
+ document.getElementById('sessionModal').classList.add('active');
+ document.getElementById('modalMachineName').textContent = `Connecting to ${targetId}...`;
+ }
+
+ function filterTable() {
+ const input = document.getElementById('searchInput');
+ const filter = input.value.toLowerCase();
+ const rows = document.getElementsByClassName('table-row');
+
+ for (let i = 0; i < rows.length; i++) {
+ const name = rows[i].getElementsByClassName('machine-info')[0].innerText.toLowerCase();
+ if (name.includes(filter)) {
+ rows[i].style.display = '';
+ } else {
+ rows[i].style.display = 'none';
+ }
+ }
  }
  </script>
 </body>
