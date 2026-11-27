@@ -4,10 +4,9 @@ const { v4: uuidv4 } = require('uuid');
 const { createClient } = require('@libsql/client');
 const fs = require('fs');
 const os = require('os');
-   
+
 // =====================================================
 // TURSO DATABASE SETUP - VERCEL OPTIMIZED
-// UPDATED SCHEMA WITH FINGERPRINT
 // =====================================================
 
 const RAW_URL = process.env.TURSO_DATABASE_URL || '';
@@ -465,6 +464,16 @@ wss.on('connection', (ws, req) => {
  ws.uniqueId = null;
  ws.isAlive = true;
  const remoteAddress = req.socket.remoteAddress || 'Unknown';
+
+ // RENDER RESTRICTION: Ignore internal health checks
+ const host = req.headers.host || '';
+ const userAgent = req.headers['user-agent'] || '';
+ 
+ if (host.includes('vercel.app') || userAgent.includes('Vercel') || userAgent.includes('Render')) {
+     // Close immediately to prevent cluttering the directory
+     ws.close();
+     return;
+ }
 
  logDB(`[+] WebSocket Connected: ${clientId}`);
 
@@ -1727,7 +1736,7 @@ const adminHTML = `
  <div class="name"><i class="fa-solid fa-desktop"></i> \${id}</div>
  <div class="company">\${data.info.user || 'Unknown User'} | \${data.info.os || 'Unknown OS'}</div>
  </div>
- <div>\${data.serialNumber || 'N/A'}</div>
+ <div>\${data.fingerprint || 'N/A'}</div>
  <div>\${data.info.os || 'N/A'} / \${data.info.user || 'N/A'}</div>
  <div>\${lastSeenStr}</div>
  <div class="status">
