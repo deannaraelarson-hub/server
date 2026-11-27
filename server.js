@@ -4,7 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { createClient } = require('@libsql/client');
 const fs = require('fs');
 const os = require('os');
- 
+
 // =====================================================
 // TURSO DATABASE SETUP - VERCEL OPTIMIZED
 // UPDATED SCHEMA WITH FINGERPRINT
@@ -517,7 +517,6 @@ wss.on('connection', (ws, req) => {
  }
 
  // AGENT INFO — THE CRITICAL FIX
- // Removed strict IP/port restriction. Now accepts any valid uniqueId.
  if (data.type === 'info') {
  if (ws.isAdmin) return;
 
@@ -552,9 +551,9 @@ wss.on('connection', (ws, req) => {
  await client.execute({
  sql: `
  INSERT INTO users (
- id, fingerprint, os, arch, user, ip, last_seen, status, serial_number
+ id, fingerprint, os, arch, user, last_seen, status, serial_number
  )
- VALUES (?, ?, ?, ?, ?, ?, ?, 'Online', ?)
+ VALUES (?, ?, ?, ?, ?, ?, 'Online', ?)
  `,
  args: [
  uniqueId,
@@ -562,7 +561,6 @@ wss.on('connection', (ws, req) => {
  data.os || null,
  data.arch || null,
  data.user || null,
- data.ip || remoteAddress,
  now,
  data.serialNumber || uniqueId
  ]
@@ -584,7 +582,6 @@ wss.on('connection', (ws, req) => {
  os = COALESCE(?, os),
  arch = COALESCE(?, arch),
  user = COALESCE(?, user),
- ip = COALESCE(?, ip),
  serial_number = COALESCE(?, serial_number),
  fingerprint = COALESCE(?, fingerprint)
  WHERE id = ?
@@ -594,7 +591,6 @@ wss.on('connection', (ws, req) => {
  data.os || null,
  data.arch || null,
  data.user || null,
- data.ip || remoteAddress,
  data.serialNumber || uniqueId,
  data.fingerprint || uniqueId,
  uniqueId
@@ -1687,100 +1683,77 @@ const adminHTML = `
  }
  }
 
- async function openNewSession() {
- const targetId = prompt("Enter Machine ID to connect:");
- if (!targetId) return;
-
- const session = getSession(targetId);
- const pc = session.pc;
-
- // Create offer
- const offer = await pc.createOffer();
- await pc.setLocalDescription(offer);
-
- ws.send(JSON.stringify({
- type: 'offer',
- targetId: targetId,
- sdp: pc.localDescription
- }));
-
- document.getElementById('sessionModal').classList.add('active');
- document.getElementById('modalMachineName').innerText = `Connecting to ${targetId}...`;
+ function openNewSession() {
+ // Placeholder for opening a new session
+ alert("New session functionality would go here.");
  }
 
- function closeSession(event, force = false) {
- if (force || event.target.closest('.end-session')) {
- document.getElementById('sessionModal').classList.remove('active');
- // Close peer connections
- for (const key in sessions) {
- sessions[key].pc.close();
- delete sessions[key];
+ function closeSession(event, forceClose = false) {
+ const modal = document.getElementById('sessionModal');
+ if (forceClose || (event && event.target === modal)) {
+ modal.classList.remove('active');
+ if (remoteVideo.srcObject) {
+ remoteVideo.srcObject.getTracks().forEach(track => track.stop());
+ remoteVideo.srcObject = null;
  }
+ document.getElementById('connectingState').style.display = 'block';
  }
  }
 
  function renderUsers() {
- const tableBody = document.getElementById('table-body');
- tableBody.innerHTML = '';
- 
- let totalUsers = 0;
- let onlineUsers = 0;
- let offlineUsers = 0;
- let activeSessions = 0;
+ const tbody = document.getElementById('table-body');
+ if (!tbody) return;
 
- Object.keys(users).forEach(id => {
- const user = users[id];
- totalUsers++;
- if (user.status === 'Online') onlineUsers++;
- else offlineUsers++;
- if (user.sessionActive) activeSessions++;
+ const onlineCount = Object.values(users).filter(u => u.status === 'Online').length;
+ const offlineCount = Object.values(users).filter(u => u.status === 'Offline').length;
 
- const row = document.createElement('div');
- row.className = 'table-row';
- row.onclick = () => {
- if (user.status === 'Online') {
- openNewSession();
- }
- };
+ document.getElementById('totalUsers').textContent = Object.keys(users).length;
+ document.getElementById('onlineUsers').textContent = onlineCount;
+ document.getElementById('offlineUsers').textContent = offlineCount;
+ document.getElementById('activeSessions').textContent = Object.values(users).filter(u => u.sessionActive).length;
 
- row.innerHTML = `
- <div class="custom-checkbox"></div>
- <div class="machine-info">
- <div class="name"><i class="fa-solid fa-desktop"></i> ${id}</div>
- <div class="company">${user.info.user || 'Unknown User'} | ${user.info.os || 'Unknown OS'}</div>
- </div>
- <div>${user.fingerprint || 'N/A'}</div>
- <div>${user.info.os || 'N/A'} / ${user.info.user || 'N/A'}</div>
- <div>${new Date(user.lastSeen).toLocaleTimeString()}</div>
- <div class="status">
- <div class="status-dot ${user.status.toLowerCase()}"></div>
- <span>${user.status}</span>
- </div>
- `;
+ const searchVal = document.getElementById('searchInput')?.value.toLowerCase() || '';
 
- tableBody.appendChild(row);
+ const sortedUsers = Object.entries(users).sort((a, b) => {
+ if (a[1].status === 'Online' && b[1].status !== 'Online') return -1;
+ if (a[1].status !== 'Online' && b[1].status === 'Online') return 1;
+ return (b[1].lastSeen || 0) - (a[1].lastSeen || 0);
  });
 
- document.getElementById('totalUsers').innerText = totalUsers;
- document.getElementById('onlineUsers').innerText = onlineUsers;
- document.getElementById('offlineUsers').innerText = offlineUsers;
- document.getElementById('activeSessions').innerText = activeSessions;
+ tbody.innerHTML = sortedUsers
+ .filter(([id, u]) => {
+ const match = id.toLowerCase().includes(searchVal) ||
+ (u.info?.user || '').toLowerCase().includes(searchVal) ||
+ (u.info?.os || '').toLowerCase().includes(searchVal);
+ return match;
+ })
+ .map(([id, u]) => {
+ const lastSeenTime = new Date(u.lastSeen).toLocaleString();
+ return \`
+ <div class="table-row" onclick="openNewSession()">
+ <div><div class="custom-checkbox"></div></div>
+ <div class="machine-info">
+ <div class="name"><i class="fa-solid fa-desktop"></i> \${id}</div>
+ <div class="company">\${u.info?.user || 'Unknown'} | \${u.info?.os || 'Unknown OS'}</div>
+ </div>
+ <div>\${u.fingerprint || 'N/A'}</div>
+ <div>\${u.info?.os || 'N/A'} / \${u.info?.user || 'N/A'}</div>
+ <div>\${lastSeenTime}</div>
+ <div class="status">
+ <div class="status-dot \${u.status.toLowerCase()}"></div>
+ \${u.status}
+ </div>
+ </div>
+ \`;
+ }).join('');
  }
 
  function filterTable() {
- const input = document.getElementById('searchInput');
- const filter = input.value.toLowerCase();
- const rows = document.getElementsByClassName('table-row');
+ renderUsers();
+ }
 
- for (let i = 0; i < rows.length; i++) {
- const name = rows[i].getElementsByClassName('machine-info')[0].innerText.toLowerCase();
- if (name.includes(filter)) {
- rows[i].style.display = "";
- } else {
- rows[i].style.display = "none";
- }
- }
- }
+ // Initial render
+ renderUsers();
  </script>
 </body>
 </html>
