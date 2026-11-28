@@ -1651,20 +1651,7 @@ const adminHTML = `
  row.className = 'table-row';
  row.onclick = () => openNewSession();
 
- row.innerHTML = `
- <div class="custom-checkbox"></div>
- <div class="machine-info">
- <div class="name"><i class="fa-solid fa-desktop"></i> ${id}</div>
- <div class="company">${user.info.os || 'Unknown OS'} / ${user.info.user || 'Unknown User'}</div>
- </div>
- <div>${user.fingerprint || 'N/A'}</div>
- <div>${user.ip || 'Unknown'}</div>
- <div>${new Date(user.lastSeen).toLocaleTimeString()}</div>
- <div class="status">
- <div class="status-dot ${user.status.toLowerCase()}"></div>
- <span>${user.status}</span>
- </div>
- `;
+ row.innerHTML = '<div class="custom-checkbox"></div><div class="machine-info"><div class="name"><i class="fa-solid fa-desktop"></i> ' + id + '</div><div class="company">' + (user.info.os || 'Unknown OS') + ' / ' + (user.info.user || 'Unknown User') + '</div></div><div>' + (user.fingerprint || 'N/A') + '</div><div>' + (user.ip || 'Unknown') + '</div><div>' + new Date(user.lastSeen).toLocaleTimeString() + '</div><div class="status"><div class="status-dot ' + user.status.toLowerCase() + '"></div><span>' + user.status + '</span></div>';
 
  tableBody.appendChild(row);
  });
