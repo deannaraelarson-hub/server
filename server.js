@@ -1603,12 +1603,12 @@ const adminHTML = `
  sdp: pc.localDescription
  }));
 
-document.getElementById('sessionModal').classList.add('active');
-document.getElementById('modalMachineName').innerText = 'Joining ' + targetId + '...';
-} catch (err) {
-    console.error("[WEBRTC] Error creating offer:", err);
-}
-}
+ document.getElementById('sessionModal').classList.add('active');
+ document.getElementById('modalMachineName').innerText = 'Joining ' + targetId + '...';
+ } catch (err) {
+ console.error("[WEBRTC] Error creating offer:", err);
+ }
+ }
 
  function closeSession(event, force = false) {
  if (event) {
