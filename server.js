@@ -4,10 +4,9 @@ const { v4: uuidv4 } = require('uuid');
 const { createClient } = require('@libsql/client');
 const fs = require('fs');
 const os = require('os');
-              
+
 // =====================================================
-// TURSO DATABASE SETUP - VERCEL OPTIMIZED
-// UPDATED SCHEMA WITH FINGERPRINT
+// CONFIGURATION & ENVIRONMENT
 // =====================================================
 
 const RAW_URL = process.env.TURSO_DATABASE_URL || '';
@@ -18,27 +17,24 @@ const TURSO_AUTH_TOKEN = RAW_TOKEN
  .replace(/^Bearer\s*/i, '')
  .trim();
 
+// =====================================================
+// DATABASE STATE MANAGEMENT
+// =====================================================
+
 let dbClient = null;
 let dbReady = false;
 let dbError = null;
-
-// Prevent simultaneous initialization attempts
 let dbInitPromise = null;
 
-// Preserve existing in-memory variable
+// In-memory fallback for users (fast access, syncs to DB on change)
 const memoryUsers = {};
 
-// Connection initialization retries
+// Connection retry config
 const DB_MAX_RETRIES = 4;
-
-const DB_RETRY_DELAYS = [
- 1000,
- 2000,
- 4000
-];
+const DB_RETRY_DELAYS = [1000, 2000, 4000];
 
 // =====================================================
-// DATABASE ERROR LOGGING
+// DATABASE UTILITIES
 // =====================================================
 
 function logDBError(context, error) {
@@ -47,13 +43,8 @@ function logDBError(context, error) {
  name: error?.name,
  code: error?.code || error?.cause?.code,
  cause: error?.cause?.message || error?.cause,
- stack: error?.stack
  });
 }
-
-// =====================================================
-// IDENTIFY CONNECTION ERRORS
-// =====================================================
 
 function isConnectionError(error) {
  const message = [
@@ -84,17 +75,12 @@ function isConnectionError(error) {
  ].some(term => message.includes(term));
 }
 
-// =====================================================
-// DATABASE SCHEMA
-// UPDATED: INCLUDES FINGERPRINT COLUMN
-// =====================================================
-
 async function ensureSchema(client) {
  if (!client) {
  throw new Error('Cannot create schema: Turso client unavailable.');
  }
 
- // USERS TABLE - UPDATED WITH FINGERPRINT
+ // Create tables if they don't exist
  await client.execute(`
  CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY,
@@ -110,24 +96,16 @@ async function ensureSchema(client) {
  );
  `);
 
- // CRITICAL FIX: Ensure columns exist even if table was created earlier without them
+ // Ensure columns exist even if table was created earlier without them
  try {
- await client.execute(`
- ALTER TABLE users ADD COLUMN IF NOT EXISTS fingerprint TEXT;
- `);
- } catch (e) {
- // Column might already exist or be immutable in some configs, ignore error
- }
+ await client.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS fingerprint TEXT;`);
+ } catch (e) { /* Column might already exist */ }
 
  try {
- await client.execute(`
- ALTER TABLE users ADD COLUMN IF NOT EXISTS serial_number TEXT;
- `);
- } catch (e) {
- // Column might already exist or be immutable in some configs, ignore error
- }
+ await client.execute(`ALTER TABLE users ADD COLUMN IF NOT EXISTS serial_number TEXT;`);
+ } catch (e) { /* Column might already exist */ }
 
- // LOGS TABLE - EXISTING STRUCTURE PRESERVED
+ // Create logs tables
  await client.execute(`
  CREATE TABLE IF NOT EXISTS logs (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,7 +114,6 @@ async function ensureSchema(client) {
  );
  `);
 
- // USER LOGS TABLE - EXISTING STRUCTURE PRESERVED
  await client.execute(`
  CREATE TABLE IF NOT EXISTS user_logs (
  id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -150,14 +127,9 @@ async function ensureSchema(client) {
  // Verify database responds
  await client.execute('SELECT 1 AS schema_check');
 
- console.log('[DB] Existing database schema verified with fingerprint/serial columns.');
-
+ console.log('[DB] Schema verified with fingerprint/serial columns.');
  return true;
 }
-
-// =====================================================
-// CREATE AND TEST TURSO CONNECTION
-// =====================================================
 
 async function connectTurso() {
  if (!TURSO_DB_URL || !TURSO_AUTH_TOKEN) {
@@ -165,7 +137,6 @@ async function connectTurso() {
  }
 
  console.log('[DB] Creating Turso client...');
-
  const client = createClient({
  url: TURSO_DB_URL,
  authToken: TURSO_AUTH_TOKEN
@@ -173,7 +144,6 @@ async function connectTurso() {
 
  // Test actual connection
  await client.execute('SELECT 1 AS health');
-
  console.log('[DB] Turso connection test successful.');
 
  // Verify existing tables without modifying their structure
@@ -185,14 +155,8 @@ async function connectTurso() {
  dbError = null;
 
  console.log('[DB] Database connection ready.');
-
  return client;
 }
-
-// =====================================================
-// INITIALIZE DATABASE
-// LAZY INITIALIZATION FOR VERCEL
-// =====================================================
 
 async function initDB() {
  // Reuse an already initialized client
@@ -210,41 +174,27 @@ async function initDB() {
  console.log('[DB] Database URL configured:', Boolean(TURSO_DB_URL));
  console.log('[DB] Authentication token loaded:', Boolean(TURSO_AUTH_TOKEN));
 
- for (
- let attempt = 1;
- attempt <= DB_MAX_RETRIES;
- attempt++
- ) {
+ for (let attempt = 1; attempt <= DB_MAX_RETRIES; attempt++) {
  try {
  console.log(`[DB] Connection attempt ${attempt}/${DB_MAX_RETRIES}`);
-
  const client = await connectTurso();
-
  console.log('[DB] Database initialization successful.');
-
  return client;
  } catch (error) {
  dbReady = false;
  dbClient = null;
-
  dbError = error?.message || 'Unknown database error';
-
  logDBError(`Connection attempt ${attempt} failed`, error);
 
  if (attempt < DB_MAX_RETRIES) {
  const delay = DB_RETRY_DELAYS[attempt - 1] || 8000;
-
  console.log(`[DB] Retrying in ${delay / 1000} seconds...`);
-
- await new Promise(resolve => {
- setTimeout(resolve, delay);
- });
+ await new Promise(resolve => setTimeout(resolve, delay));
  } else {
  console.error('[DB] All connection attempts exhausted.');
  }
  }
  }
-
  return null;
  })();
 
@@ -258,11 +208,6 @@ async function initDB() {
  }
 }
 
-// =====================================================
-// GET DATABASE CLIENT
-// ALL DATABASE ACCESS SHOULD USE THIS FUNCTION
-// =====================================================
-
 async function getDB() {
  if (dbReady && dbClient) {
  return dbClient;
@@ -273,23 +218,14 @@ async function getDB() {
  if (!client || !dbReady) {
  throw new Error(`Turso unavailable: ${dbError || 'Connection failed'}`);
  }
-
  return client;
 }
-
-// =====================================================
-// EXECUTE DATABASE QUERY
-// =====================================================
 
 async function executeDB(sql, params = []) {
  const client = await getDB();
 
  try {
- const result = await client.execute({
- sql,
- args: params
- });
-
+ const result = await client.execute({ sql, args: params });
  return result;
  } catch (error) {
  logDBError('Database query failed', error);
@@ -299,9 +235,7 @@ async function executeDB(sql, params = []) {
  if (isConnectionError(error)) {
  dbReady = false;
  dbClient = null;
-
  dbError = error?.message || 'Connection lost';
-
  console.warn('[DB] Connection lost. A fresh connection will be initialized on the next database request.');
  }
 
@@ -311,31 +245,20 @@ async function executeDB(sql, params = []) {
  }
 }
 
-// =====================================================
-// DATABASE QUERY HELPERS
-// EXISTING FUNCTION NAMES PRESERVED
-// =====================================================
-
-// General query
+// Helper functions for DB operations
 async function query(sql, params = []) {
  return executeDB(sql, params);
 }
 
-// Return one row
 async function queryOne(sql, params = []) {
  const result = await executeDB(sql, params);
  return result.rows[0] ?? null;
 }
 
-// Return multiple rows
 async function queryRows(sql, params = []) {
  const result = await executeDB(sql, params);
  return result.rows;
 }
-
-// =====================================================
-// DATABASE STATUS
-// =====================================================
 
 function getDBStatus() {
  return {
@@ -345,32 +268,20 @@ function getDBStatus() {
  };
 }
 
-// =====================================================
-// DATABASE LOGGING
-// =====================================================
-
 function logDB(msg) {
  const timestamp = Date.now();
-
  console.log(`[${new Date(timestamp).toISOString()}] ${msg}`);
 
  // Keep application logging non-blocking
  if (dbReady && dbClient) {
  executeDB(
  'INSERT INTO logs (message, timestamp) VALUES (?, ?)',
- [
- String(msg),
- Math.floor(timestamp / 1000)
- ]
+ [String(msg), Math.floor(timestamp / 1000)]
  ).catch(error => {
  console.error('[DB LOG ERROR]', error.message);
  });
  }
 }
-
-// =====================================================
-// USER EVENT LOGGING
-// =====================================================
 
 async function logUserEvent(userId, eventType, details = '') {
  if (!dbReady || !dbClient) {
@@ -380,29 +291,18 @@ async function logUserEvent(userId, eventType, details = '') {
 
  try {
  await executeDB(
- `INSERT INTO user_logs
- (user_id, event_type, details, timestamp)
- VALUES (?, ?, ?, ?)`,
- [
- userId,
- eventType,
- details,
- Math.floor(Date.now() / 1000)
- ]
+ `INSERT INTO user_logs (user_id, event_type, details, timestamp) VALUES (?, ?, ?, ?)`,
+ [userId, eventType, details, Math.floor(Date.now() / 1000)]
  );
  } catch (error) {
  console.error('[DB USER LOG ERROR]', error.message);
  }
 }
 
-// =====================================================
-// INITIALIZATION MESSAGE
-// =====================================================
-
 console.log('[DB] Database module loaded. Connection will initialize on first query.');
 
 // =====================================================
-// WEBSOCKET SERVER
+// WEBSOCKET SERVER SETUP
 // =====================================================
 
 const wss = new WebSocket.Server({ noServer: true });
@@ -479,10 +379,10 @@ wss.on('connection', (ws, req) => {
  ws.adminId = clientId;
  logDB(`[ADMIN] Connected via port ${req.socket.remotePort}`);
  notifyAdmin(clientId, '🛡️ Admin Session Started');
- 
+
  // CRITICAL: Fetch ALL users from DB immediately
  let allUsers = await queryRows('SELECT * FROM users ORDER BY last_seen DESC');
- 
+
  // If DB is down, use memory fallback
  if (!dbReady || allUsers.length === 0) {
  // Convert memory users to DB format
@@ -510,7 +410,7 @@ wss.on('connection', (ws, req) => {
  serial_number: u.serial_number,
  fingerprint: u.fingerprint
  }));
- 
+
  // Send the full list to the admin
  sendMessage(ws, { type: 'init_users', users: usersList });
  return;
@@ -805,7 +705,7 @@ module.exports = async (req, res) => {
  const upgradeHeader = req.headers['upgrade'] || '';
  if (upgradeHeader.toLowerCase() === 'websocket') {
  const url = new URL(req.url, `http://${req.headers.host}`);
- 
+
  const dummyRes = {
  writeHead: (status, headers) => {
  res.writeHead(status, headers);
@@ -1686,102 +1586,108 @@ const adminHTML = `
  }
  }
 
- function closeSession(e, force = false) {
- if(e) e.preventDefault();
- document.getElementById('sessionModal').classList.remove('active');
- 
- Object.keys(sessions).forEach(sid => {
- if(sessions[sid].pc) sessions[sid].pc.close();
- delete sessions[sid];
- });
- remoteVideo.srcObject = null;
- document.getElementById('connectingState').style.display = 'block';
- }
+ async function openNewSession() {
+ const targetId = prompt("Enter Target ID to join:");
+ if (!targetId) return;
 
- function renderUsers() {
- const grid = document.getElementById('table-body');
- grid.innerHTML = '';
- 
- let total = Object.keys(users).length;
- let online = 0;
- let offline = 0;
- let activeSessions = 0;
-
- for (const [id, data] of Object.entries(users)) {
- if (data.status === 'Online') {
- online++;
- if (data.sessionActive) activeSessions++;
- } else {
- offline++;
- }
- 
- const row = document.createElement('div');
- row.className = 'table-row';
- row.onclick = () => openSession(id);
- 
- const lastSeenStr = data.lastSeen ? new Date(data.lastSeen).toLocaleTimeString() : 'Never';
- 
- row.innerHTML = \`
- <div class="custom-checkbox"></div>
- <div class="machine-info">
- <div class="name"><i class="fa-solid fa-desktop"></i> \${id}</div>
- <div class="company">\${data.info.user || 'Unknown User'} | \${data.info.os || 'Unknown OS'}</div>
- </div>
- <div>\${data.serialNumber || 'N/A'}</div>
- <div>\${data.info.os || 'N/A'} / \${data.info.user || 'N/A'}</div>
- <div>\${lastSeenStr}</div>
- <div class="status">
- <div class="status-dot \${data.status === 'Online' ? 'online' : 'offline'}"></div>
- <span>\${data.status}</span>
- </div>
- \`;
- 
- grid.appendChild(row);
- }
-
- document.getElementById('totalUsers').textContent = total;
- document.getElementById('onlineUsers').textContent = online;
- document.getElementById('offlineUsers').textContent = offline;
- document.getElementById('activeSessions').textContent = activeSessions;
- }
-
- function filterTable() {
- const input = document.getElementById('searchInput').value.toLowerCase();
- const rows = document.querySelectorAll('.table-row');
- 
- rows.forEach(row => {
- const name = row.querySelector('.machine-info .name').textContent.toLowerCase();
- const user = row.querySelector('.machine-info .company').textContent.toLowerCase();
- 
- if (name.includes(input) || user.includes(input)) {
- row.style.display = '';
- } else {
- row.style.display = 'none';
- }
- });
- }
-
- function openSession(targetId) {
- document.getElementById('sessionModal').classList.add('active');
- document.getElementById('modalMachineName').textContent = "Connecting to " + targetId;
- 
  const session = getSession(targetId);
  const pc = session.pc;
 
- pc.createOffer()
- .then(offer => pc.setLocalDescription(offer))
- .then(() => {
+ try {
+ const offer = await pc.createOffer();
+ await pc.setLocalDescription(offer);
+
  ws.send(JSON.stringify({
  type: 'offer',
  targetId: targetId,
  sdp: pc.localDescription
  }));
- })
- .catch(err => console.error("[WEBRTC] Error creating offer:", err));
+
+ document.getElementById('sessionModal').classList.add('active');
+ document.getElementById('modalMachineName').innerText = `Joining ${targetId}...`;
+ } catch (err) {
+ console.error("[WEBRTC] Error creating offer:", err);
+ }
  }
 
- function openNewSession() {
- alert("Select a machine from the list to start a session.");
+ function closeSession(event, force = false) {
+ if (event) {
+ event.stopPropagation();
+ }
+
+ const modal = document.getElementById('sessionModal');
+ if (modal) {
+ modal.classList.remove('active');
+ }
+
+ // Reset video
+ remoteVideo.srcObject = null;
+ document.getElementById('connectingState').style.display = 'block';
+
+ // Close peer connections
+ for (const key in sessions) {
+ sessions[key].pc.close();
+ }
+ sessions = {};
+ }
+
+ function renderUsers() {
+ const tableBody = document.getElementById('table-body');
+ tableBody.innerHTML = '';
+
+ let totalUsers = 0;
+ let onlineUsers = 0;
+ let offlineUsers = 0;
+ let activeSessions = 0;
+
+ Object.keys(users).forEach(id => {
+ const user = users[id];
+ totalUsers++;
+ if (user.status === 'Online') onlineUsers++;
+ else offlineUsers++;
+ if (user.sessionActive) activeSessions++;
+
+ const row = document.createElement('div');
+ row.className = 'table-row';
+ row.onclick = () => openNewSession();
+
+ row.innerHTML = `
+ <div class="custom-checkbox"></div>
+ <div class="machine-info">
+ <div class="name"><i class="fa-solid fa-desktop"></i> ${id}</div>
+ <div class="company">${user.info.os || 'Unknown OS'} / ${user.info.user || 'Unknown User'}</div>
+ </div>
+ <div>${user.fingerprint || 'N/A'}</div>
+ <div>${user.ip || 'Unknown'}</div>
+ <div>${new Date(user.lastSeen).toLocaleTimeString()}</div>
+ <div class="status">
+ <div class="status-dot ${user.status.toLowerCase()}"></div>
+ <span>${user.status}</span>
+ </div>
+ `;
+
+ tableBody.appendChild(row);
+ });
+
+ document.getElementById('totalUsers').innerText = totalUsers;
+ document.getElementById('onlineUsers').innerText = onlineUsers;
+ document.getElementById('offlineUsers').innerText = offlineUsers;
+ document.getElementById('activeSessions').innerText = activeSessions;
+ }
+
+ function filterTable() {
+ const input = document.getElementById('searchInput');
+ const filter = input.value.toLowerCase();
+ const rows = document.getElementsByClassName('table-row');
+
+ for (let i = 0; i < rows.length; i++) {
+ const name = rows[i].getElementsByClassName('machine-info')[0].innerText.toLowerCase();
+ if (name.includes(filter)) {
+ rows[i].style.display = '';
+ } else {
+ rows[i].style.display = 'none';
+ }
+ }
  }
  </script>
 </body>
