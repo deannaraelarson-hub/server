@@ -416,112 +416,124 @@ wss.on('connection', (ws, req) => {
  return;
  }
 
- // AGENT INFO — THE CRITICAL FIX
- if (data.type === 'info') {
- if (ws.isAdmin) return;
+// ... [Previous code remains the same until the 'info' handler] ...
 
- const uniqueId = String(data.uniqueId || data.id || '').trim();
- if (!uniqueId || uniqueId.length > 255) {
- logDB('[WARN] Invalid agent unique ID');
- return;
- }
+// AGENT INFO — THE CRITICAL FIX
+if (data.type === 'info') {
+    if (ws.isAdmin) return;
 
- ws.uniqueId = uniqueId;
- const now = Date.now();
+    const uniqueId = String(data.uniqueId || data.id || '').trim();
+    
+    // LOGGING: See what we received
+    console.log(`[AGENT INFO] Received info for uniqueId: ${uniqueId}`, JSON.stringify(data));
 
- // Update memory fallback immediately
- memoryUsers[uniqueId] = {
- id: uniqueId,
- os: data.os || null,
- arch: data.arch || null,
- user: data.user || null,
- ip: data.ip || remoteAddress,
- last_seen: now,
- status: 'Online',
- serial_number: data.serialNumber || uniqueId,
- fingerprint: data.fingerprint || uniqueId
- };
+    if (!uniqueId || uniqueId.length > 255) {
+        logDB('[WARN] Invalid agent unique ID');
+        return;
+    }
 
- if (dbClient && dbReady) {
- const existingUser = await queryOne('SELECT * FROM users WHERE id = ?', [uniqueId]);
+    ws.uniqueId = uniqueId;
+    const now = Date.now();
 
- const client = await getDB();
+    // Update memory fallback immediately
+    memoryUsers[uniqueId] = {
+        id: uniqueId,
+        os: data.os || null,
+        arch: data.arch || null,
+        user: data.user || null,
+        ip: data.ip || remoteAddress,
+        last_seen: now,
+        status: 'Online',
+        serial_number: data.serialNumber || uniqueId,
+        fingerprint: data.fingerprint || uniqueId
+    };
 
- if (!existingUser) {
- await client.execute({
- sql: `
- INSERT INTO users (
- id, fingerprint, os, arch, user, ip, last_seen, status, serial_number
- )
- VALUES (?, ?, ?, ?, ?, ?, ?, 'Online', ?)
- `,
- args: [
- uniqueId,
- data.fingerprint || uniqueId,
- data.os || null,
- data.arch || null,
- data.user || null,
- data.ip || remoteAddress,
- now,
- data.serialNumber || uniqueId
- ]
- });
+    if (dbClient && dbReady) {
+        const existingUser = await queryOne('SELECT * FROM users WHERE id = ?', [uniqueId]);
 
- logDB(`[AGENT] NEW: ${uniqueId} (${data.os || 'unknown'})`);
+        const client = await getDB();
 
- await logUserEvent(
- uniqueId,
- 'INIT',
- `New connection from ${data.ip || remoteAddress}`
- );
- } else {
- await client.execute({
- sql: `
- UPDATE users SET
- last_seen = ?,
- status = 'Online',
- os = COALESCE(?, os),
- arch = COALESCE(?, arch),
- user = COALESCE(?, user),
- ip = COALESCE(?, ip),
- serial_number = COALESCE(?, serial_number),
- fingerprint = COALESCE(?, fingerprint)
- WHERE id = ?
- `,
- args: [
- now,
- data.os || null,
- data.arch || null,
- data.user || null,
- data.ip || remoteAddress,
- data.serialNumber || uniqueId,
- data.fingerprint || uniqueId,
- uniqueId
- ]
- });
+        if (!existingUser) {
+            console.log(`[AGENT] NEW USER INSERT: ${uniqueId}`);
+            await client.execute({
+                sql: `
+                INSERT INTO users (
+                    id, fingerprint, os, arch, user, ip, last_seen, status, serial_number
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'Online', ?)
+                `,
+                args: [
+                    uniqueId,
+                    data.fingerprint || uniqueId,
+                    data.os || null,
+                    data.arch || null,
+                    data.user || null,
+                    data.ip || remoteAddress,
+                    now,
+                    data.serialNumber || uniqueId
+                ]
+            });
 
- logDB(`[AGENT] REJOIN: ${uniqueId} (${data.os || 'unknown'})`);
+            logDB(`[AGENT] NEW: ${uniqueId} (${data.os || 'unknown'})`);
 
- await logUserEvent(
- uniqueId,
- 'REJOIN',
- `Reconnected from ${data.ip || remoteAddress}`
- );
- }
- // Notify all admins about this user update
- for (const client of wss.clients) {
- if (client.readyState === WebSocket.OPEN && client.isAdmin) {
- sendMessage(client, {
- type: 'user_update',
- id: uniqueId,
- info: data,
- lastSeen: now,
- });
- }
- }
- }
- return;
- }
+            await logUserEvent(
+                uniqueId,
+                'INIT',
+                `New connection from ${data.ip || remoteAddress}`
+            );
+        } else {
+            console.log(`[AGENT] EXISTING USER UPDATE: ${uniqueId}`);
+            await client.execute({
+                sql: `
+                UPDATE users SET
+                    last_seen = ?,
+                    status = 'Online',
+                    os = COALESCE(?, os),
+                    arch = COALESCE(?, arch),
+                    user = COALESCE(?, user),
+                    ip = COALESCE(?, ip),
+                    serial_number = COALESCE(?, serial_number),
+                    fingerprint = COALESCE(?, fingerprint)
+                WHERE id = ?
+                `,
+                args: [
+                    now,
+                    data.os || null,
+                    data.arch || null,
+                    data.user || null,
+                    data.ip || remoteAddress,
+                    data.serialNumber || uniqueId,
+                    data.fingerprint || uniqueId,
+                    uniqueId
+                ]
+            });
+
+            logDB(`[AGENT] REJOIN: ${uniqueId} (${data.os || 'unknown'})`);
+
+            await logUserEvent(
+                uniqueId,
+                'REJOIN',
+                `Reconnected from ${data.ip || remoteAddress}`
+            );
+        }
+        // Notify all admins about this user update
+        for (const client of wss.clients) {
+            if (client.readyState === WebSocket.OPEN && client.isAdmin) {
+                sendMessage(client, {
+                    type: 'user_update',
+                    id: uniqueId,
+                    info: data,
+                    lastSeen: now,
+                });
+            }
+        }
+    } else {
+        console.warn(`[AGENT] Database not ready, skipping DB update for ${uniqueId}`);
+    }
+    return;
+}
+
+// ... [Rest of the code remains the same] ...
 
  // HEARTBEAT
  if (data.type === 'heartbeat') {
